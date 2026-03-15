@@ -1,1 +1,24 @@
-spring.application.name=ByteFerry
+spring:
+  application:
+    name: ByteFerry
+
+  # Redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: "Ww249260523.."
+
+  # File upload
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+# ByteFerry custom config
+byteferry:
+  storage:
+    file-dir: ${user.home}/.byteferry/files/
+  share:
+    default-expire-seconds: 600
+    code-length: 6

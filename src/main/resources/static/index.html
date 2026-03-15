@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ByteFerry - 跨设备传输</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-sm">
+        <div class="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
+            <h1 class="text-xl font-bold text-gray-800">
+                <span class="text-blue-600">Byte</span>Ferry
+            </h1>
+            <nav class="flex space-x-1 bg-gray-100 rounded-lg p-1">
+                <button id="tab-send" class="tab-btn active px-4 py-1.5 text-sm rounded-md font-medium transition-all" onclick="switchTab('send')">
+                    Send
+                </button>
+                <button id="tab-receive" class="tab-btn px-4 py-1.5 text-sm rounded-md font-medium transition-all" onclick="switchTab('receive')">
+                    Receive
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 py-8">
+        <!-- Send View -->
+        <div id="view-send">
+            <!-- Content type selector -->
+            <div class="flex space-x-2 mb-6">
+                <button class="type-btn active px-4 py-2 rounded-lg text-sm font-medium" data-type="text" onclick="switchType('text')">
+                    Text
+                </button>
+                <button class="type-btn px-4 py-2 rounded-lg text-sm font-medium" data-type="image" onclick="switchType('image')">
+                    Image
+                </button>
+                <button class="type-btn px-4 py-2 rounded-lg text-sm font-medium" data-type="file" onclick="switchType('file')">
+                    File
+                </button>
+            </div>
+
+            <!-- Text input -->
+            <div id="input-text" class="input-area">
+                <textarea id="text-content" class="w-full h-48 p-4 border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-sm" placeholder="Paste or type your text here..."></textarea>
+            </div>
+
+            <!-- Image upload (multiple) -->
+            <div id="input-image" class="input-area hidden">
+                <div id="image-drop-zone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
+                    <div id="image-preview-container" class="hidden flex flex-wrap justify-center gap-2 mb-4">
+                    </div>
+                    <div id="image-placeholder">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                        <p class="text-gray-500 text-sm">Drop images here or click to select</p>
+                        <p class="text-gray-400 text-xs mt-1">Supports multiple images</p>
+                    </div>
+                    <input id="image-input" type="file" accept="image/*" multiple class="hidden" onchange="handleImageSelect(event)">
+                </div>
+            </div>
+
+            <!-- File upload (multiple) -->
+            <div id="input-file" class="input-area hidden">
+                <div id="file-drop-zone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all">
+                    <div id="file-list" class="hidden text-left mb-2">
+                    </div>
+                    <div id="file-placeholder">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <p class="text-gray-500 text-sm">Drop files here or click to select</p>
+                        <p class="text-gray-400 text-xs mt-1">Supports multiple files, max 100MB each</p>
+                    </div>
+                    <input id="file-input" type="file" multiple class="hidden" onchange="handleFileSelect(event)">
+                </div>
+            </div>
+
+            <!-- Options -->
+            <div class="mt-4 flex items-center space-x-4">
+                <label class="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
+                    <input id="delete-after" type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                    <span>Delete after download</span>
+                </label>
+            </div>
+
+            <!-- Send button -->
+            <button id="send-btn" class="mt-6 w-full bg-blue-600 text-white py-3 rounded-xl font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" onclick="send()">
+                Send
+            </button>
+
+            <!-- Result -->
+            <div id="send-result" class="hidden mt-6 bg-white rounded-xl p-6 border border-gray-200 text-center">
+                <p class="text-gray-500 text-sm mb-2">Share Code</p>
+                <p id="share-code" class="text-4xl font-mono font-bold text-blue-600 tracking-widest mb-4"></p>
+                <button class="text-sm text-blue-600 hover:text-blue-800 font-medium" onclick="copyCode()">
+                    Copy Code
+                </button>
+            </div>
+        </div>
+
+        <!-- Receive View -->
+        <div id="view-receive" class="hidden">
+            <div class="bg-white rounded-xl p-6 border border-gray-200">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Enter Share Code</label>
+                <div class="flex space-x-3">
+                    <input id="receive-code" type="text" maxlength="8"
+                           class="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-center text-2xl font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                           placeholder="A7F3K9"
+                           onkeydown="if(event.key==='Enter') receive()">
+                    <button class="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors" onclick="receive()">
+                        Get
+                    </button>
+                </div>
+            </div>
+
+            <!-- Receive result -->
+            <div id="receive-result" class="hidden mt-6">
+                <!-- Text result -->
+                <div id="result-text" class="hidden bg-white rounded-xl p-6 border border-gray-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Text</span>
+                        <button class="text-sm text-blue-600 hover:text-blue-800 font-medium" onclick="copyContent()">
+                            Copy
+                        </button>
+                    </div>
+                    <pre id="text-result-content" class="whitespace-pre-wrap break-words text-sm text-gray-800 bg-gray-50 p-4 rounded-lg max-h-96 overflow-auto"></pre>
+                </div>
+
+                <!-- Image results (multiple) -->
+                <div id="result-images" class="hidden bg-white rounded-xl p-6 border border-gray-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Images</span>
+                    </div>
+                    <div id="image-results-grid" class="grid grid-cols-2 gap-3"></div>
+                </div>
+
+                <!-- File results (multiple) -->
+                <div id="result-files" class="hidden bg-white rounded-xl p-6 border border-gray-200">
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="text-xs font-medium text-gray-500 uppercase tracking-wider">Files</span>
+                    </div>
+                    <div id="file-results-list"></div>
+                </div>
+
+                <!-- Delete after download warning -->
+                <div id="result-delete-warning" class="hidden mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p class="text-yellow-700 text-sm">This share will be deleted after download.</p>
+                </div>
+            </div>
+
+            <!-- Error -->
+            <div id="receive-error" class="hidden mt-6 bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                <p class="text-red-600 text-sm" id="error-message"></p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-5 py-2.5 rounded-lg text-sm opacity-0 transition-opacity pointer-events-none">
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

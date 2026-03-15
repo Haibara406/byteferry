@@ -1,0 +1,33 @@
+.tab-btn {
+    color: #6b7280;
+}
+
+.tab-btn.active {
+    background-color: white;
+    color: #1d4ed8;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.type-btn {
+    background-color: #f3f4f6;
+    color: #6b7280;
+    transition: all 0.15s;
+}
+
+.type-btn.active {
+    background-color: #dbeafe;
+    color: #1d4ed8;
+}
+
+.type-btn:hover:not(.active) {
+    background-color: #e5e7eb;
+}
+
+.drop-zone.drag-over {
+    border-color: #3b82f6;
+    background-color: #eff6ff;
+}
+
+#toast.show {
+    opacity: 1;
+}
