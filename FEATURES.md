@@ -4,39 +4,86 @@
 
 ---
 
-## MVP Version
+## Product Positioning
+
+- **Token mode**: Share code for quick transfer, no login required (logged-in users can also use)
+- **Multi-device mode**: Same account shares content across devices
+- **Friend session mode**: Friends can open bidirectional transfer sessions
+
+---
+
+## MVP Version (Completed)
 
 - [x] # Text sharing (paste & send)
 - [x] # Image upload & sharing
 - [x] # File upload & sharing (max 100MB)
+- [x] # Batch file/image upload
 - [x] # Generate random share code (6-char, A-Z + 0-9)
 - [x] # Retrieve content via share code
 - [x] # Redis TTL auto-expiry (default 10 min)
 - [x] # Delete after download option
 - [x] # Drag & drop upload (image / file)
 - [x] # One-click copy (text content / share code)
-- [x] # File download
+- [x] # File download & image preview
 - [x] # Manual delete share
 - [x] # Responsive web UI
 
 ---
 
-## Full Version
+## Phase 2 - Token Session Mode
+
+> One token opens a persistent session, supports sending multiple items within the session
+
+- [x] # Token session: one code creates a session, sender can push multiple text/image/file into it
+- [x] # Receiver opens session page, sees all items in real-time (WebSocket / polling)
+- [x] # Session expiry time (configurable, default 30 min)
+- [x] # Session auto-cleanup: close session deletes all files and Redis data
+- [x] # Session status indicator (active / expired)
+- [ ] Custom expiry time selection in UI
+
+---
+
+## Phase 3 - User System & Multi-Device Sharing
+
+> Login-based features, requires MySQL
+
+- [ ] User registration & login (username + password)
+- [ ] JWT token authentication
+- [ ] MySQL database for user data
+- [ ] Personal shared space: logged-in user has a dedicated page showing all their shared content
+- [ ] Multi-device sync: same account on multiple devices sees the same shared space
+- [ ] Shared space content management (delete, view history)
+- [ ] Clipboard sync across devices (WebSocket real-time push)
+
+---
+
+## Phase 4 - Friend System & Bidirectional Sessions
+
+> Social features for logged-in users
+
+- [ ] Add friend (by username / friend code)
+- [ ] Friend list management (add / remove / block)
+- [ ] Friend request & accept flow
+- [ ] Open session with friend: create a bidirectional transfer channel
+- [ ] Bidirectional session: both sides can send text / image / file
+- [ ] In-session actions: copy text, preview image, download file
+- [ ] Session expiry: configurable timeout, auto-close when expired
+- [ ] Session close: auto-cleanup all transferred resources (files on disk + Redis data)
+- [ ] Session history (list of past sessions, no content retained after close)
+- [ ] Online status indicator for friends
+
+---
+
+## Phase 5 - Enhancement & Polish
 
 - [ ] QR code generation on share
 - [ ] Clipboard auto-detect (navigator.clipboard on page load)
-- [ ] User registration & login
-- [ ] Multi-device clipboard sync (WebSocket)
+- [ ] Image paste from clipboard (Ctrl+V)
 - [ ] URL link preview (auto-detect URL, show title/preview)
 - [ ] Code syntax highlighting
 - [ ] Client-side AES encryption
-- [ ] Custom expiry time selection in UI
 - [ ] Browser extension (auto-sync on Ctrl+C)
 - [ ] CLI tool (`share "hello world"`)
 - [ ] Open API with authentication
 - [ ] PWA support (installable, offline)
 - [ ] Docker + Nginx deployment config
-- [ ] MySQL user data persistence
-- [ ] Share history (for logged-in users)
-- [x] # Batch file upload
-- [ ] Image paste from clipboard (Ctrl+V)

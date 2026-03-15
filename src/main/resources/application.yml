@@ -22,3 +22,5 @@ byteferry:
   share:
     default-expire-seconds: 600
     code-length: 6
+  session:
+    default-expire-seconds: 1800

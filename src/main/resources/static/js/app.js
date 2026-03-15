@@ -1,344 +1,372 @@
-// State
-let currentType = 'text';
-let selectedFiles = [];
-let currentShareCode = null;
+/* ==================== State ==================== */
+let qType = 'text', qFiles = [];
+let sessCode = null, sessAttach = [], sessTimerId = null;
+let recvCode = null, recvPollId = null;
 
-// --- Tab & Type Switching ---
-
-function switchTab(tab) {
-    document.getElementById('view-send').classList.toggle('hidden', tab !== 'send');
-    document.getElementById('view-receive').classList.toggle('hidden', tab !== 'receive');
-    document.getElementById('tab-send').classList.toggle('active', tab === 'send');
-    document.getElementById('tab-receive').classList.toggle('active', tab !== 'send');
-}
-
-function switchType(type) {
-    currentType = type;
-    selectedFiles = [];
-    document.querySelectorAll('.type-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.type === type);
+/* ==================== DOM Ready ==================== */
+document.addEventListener('DOMContentLoaded', () => {
+    // Mode nav
+    document.querySelectorAll('#mode-nav .pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#mode-nav .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            show('view-quick', btn.dataset.mode === 'quick');
+            show('view-session', btn.dataset.mode === 'session');
+            if (btn.dataset.mode !== 'session') stopRecvPoll();
+        });
     });
-    document.querySelectorAll('.input-area').forEach(area => area.classList.add('hidden'));
-    document.getElementById('input-' + type).classList.remove('hidden');
-    resetUploadUI();
-}
 
-function resetUploadUI() {
-    document.getElementById('image-preview-container').innerHTML = '';
-    document.getElementById('image-preview-container').classList.add('hidden');
-    document.getElementById('image-placeholder').classList.remove('hidden');
-    document.getElementById('file-list').innerHTML = '';
-    document.getElementById('file-list').classList.add('hidden');
-    document.getElementById('file-placeholder').classList.remove('hidden');
-    document.getElementById('send-result').classList.add('hidden');
-}
+    // Quick sub-tabs
+    bindTabs('quick-nav', { 'q-send': 'q-send', 'q-recv': 'q-recv' });
 
-// --- Drag & Drop ---
+    // Session sub-tabs
+    bindTabs('sess-nav', { 's-send': 's-send', 's-recv': 's-recv' });
 
-function setupDropZone(zoneId, inputId, handler) {
-    const zone = document.getElementById(zoneId);
-    if (!zone) return;
-
-    zone.addEventListener('click', () => document.getElementById(inputId).click());
-
-    zone.addEventListener('dragover', e => {
-        e.preventDefault();
-        zone.classList.add('drag-over');
+    // Type chips
+    document.querySelectorAll('#type-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            qType = btn.dataset.type; qFiles = [];
+            document.querySelectorAll('#type-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            show('ia-text', qType === 'text');
+            show('ia-image', qType === 'image');
+            show('ia-file', qType === 'file');
+            resetQuickUpload();
+        });
     });
-    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-        e.preventDefault();
-        zone.classList.remove('drag-over');
-        if (e.dataTransfer.files.length > 0) {
-            handler(Array.from(e.dataTransfer.files));
-        }
+
+    // Dropzones
+    setupDZ('dz-image', 'img-input', files => addQFiles(files, true));
+    setupDZ('dz-file', 'file-input', files => addQFiles(files, false));
+
+    // Quick send
+    $('q-send-btn').addEventListener('click', quickSend);
+    $('q-copy-code').addEventListener('click', () => copyText($('q-code').textContent));
+
+    // Quick receive
+    $('qr-get-btn').addEventListener('click', quickRecv);
+    $('qr-code').addEventListener('keydown', e => { if (e.key === 'Enter') quickRecv(); });
+
+    // Session create
+    $('s-create-btn').addEventListener('click', sessCreate);
+    $('s-copy-code').addEventListener('click', () => copyText($('s-code').textContent));
+    $('s-code').addEventListener('click', () => copyText($('s-code').textContent));
+    $('s-close-btn').addEventListener('click', sessClose);
+    $('s-send-btn').addEventListener('click', sessSend);
+
+    // Session attach buttons
+    $('s-attach-file-btn').addEventListener('click', () => $('s-file-in').click());
+    $('s-attach-img-btn').addEventListener('click', () => $('s-img-in').click());
+    $('s-file-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
+    $('s-img-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
+
+    // Session join
+    $('sr-join-btn').addEventListener('click', sessJoin);
+    $('sr-code').addEventListener('keydown', e => { if (e.key === 'Enter') sessJoin(); });
+    $('sr-leave-btn').addEventListener('click', sessLeave);
+    $('sr-closed-leave').addEventListener('click', sessLeave);
+});
+
+/* ==================== Helpers ==================== */
+function $(id) { return document.getElementById(id); }
+function show(id, visible) { $(id).classList.toggle('hidden', !visible); }
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtSize(b) { if (!b) return '0 B'; const k = 1024, u = ['B','KB','MB','GB'], i = Math.floor(Math.log(b)/Math.log(k)); return (b/Math.pow(k,i)).toFixed(1)+' '+u[i]; }
+function fmtTime(iso) { if (!iso) return ''; const d = new Date(iso); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
+function fmtTimer(sec) { return Math.floor(sec/60) + ':' + String(sec%60).padStart(2,'0'); }
+
+function showToast(msg) {
+    const t = $('toast'); t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function copyText(text) { navigator.clipboard.writeText(text).then(() => showToast('Copied!')); }
+
+function dl(url, name) {
+    const a = document.createElement('a'); a.href = url; a.download = name || '';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function bindTabs(navId, map) {
+    const keys = Object.keys(map);
+    document.querySelectorAll('#' + navId + ' .pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#' + navId + ' .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            keys.forEach(k => show(map[k], btn.dataset.tab === k));
+        });
     });
 }
 
-function handleImageSelect(event) {
-    if (event.target.files.length > 0) {
-        handleImages(Array.from(event.target.files));
-    }
+function setupDZ(zoneId, inputId, handler) {
+    const z = $(zoneId); if (!z) return;
+    z.addEventListener('click', e => { if (!e.target.closest('button')) $(inputId).click(); });
+    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('drag-over'); });
+    z.addEventListener('dragleave', () => z.classList.remove('drag-over'));
+    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('drag-over'); if (e.dataTransfer.files.length) handler(Array.from(e.dataTransfer.files)); });
 }
 
-function handleFileSelect(event) {
-    if (event.target.files.length > 0) {
-        handleFilesSelected(Array.from(event.target.files));
-    }
+function startTimer(elId, total, onExpire) {
+    let rem = total;
+    const tick = () => {
+        $(elId).textContent = fmtTimer(Math.max(rem, 0));
+        if (rem <= 0) { clearInterval(sessTimerId); sessTimerId = null; if (onExpire) onExpire(); }
+        rem--;
+    };
+    tick();
+    if (sessTimerId) clearInterval(sessTimerId);
+    sessTimerId = setInterval(tick, 1000);
 }
 
-function handleImages(files) {
-    selectedFiles = selectedFiles.concat(files);
-    const container = document.getElementById('image-preview-container');
-    container.classList.remove('hidden');
-    document.getElementById('image-placeholder').classList.add('hidden');
+/* ==================== Quick Send ==================== */
+function resetQuickUpload() {
+    $('img-preview').innerHTML = ''; show('img-preview', false); show('img-ph', true);
+    $('file-list').innerHTML = ''; show('file-list', false); show('file-ph', true);
+    show('q-result', false);
+}
 
-    files.forEach(file => {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'inline-block relative m-1';
+function addQFiles(files, isImage) {
+    qFiles = qFiles.concat(files);
+    if (isImage) renderImgPreview();
+    else renderFileList();
+}
 
+function renderImgPreview() {
+    const c = $('img-preview'); c.innerHTML = ''; show('img-preview', true); show('img-ph', false);
+    qFiles.forEach((f, i) => {
+        const w = document.createElement('div'); w.className = 'thumb-wrap';
         const img = document.createElement('img');
-        img.className = 'h-24 rounded-lg shadow object-cover';
-        img.alt = file.name;
-
-        const removeBtn = document.createElement('button');
-        removeBtn.className = 'absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 text-xs flex items-center justify-center hover:bg-red-600';
-        removeBtn.textContent = 'x';
-        removeBtn.onclick = (e) => {
-            e.stopPropagation();
-            selectedFiles = selectedFiles.filter(f => f !== file);
-            wrapper.remove();
-            if (selectedFiles.length === 0) {
-                container.classList.add('hidden');
-                document.getElementById('image-placeholder').classList.remove('hidden');
-            }
-        };
-
-        const reader = new FileReader();
-        reader.onload = e => { img.src = e.target.result; };
-        reader.readAsDataURL(file);
-
-        wrapper.appendChild(img);
-        wrapper.appendChild(removeBtn);
-        container.appendChild(wrapper);
+        const btn = document.createElement('button'); btn.className = 'remove-btn'; btn.textContent = '\u00d7';
+        btn.addEventListener('click', e => { e.stopPropagation(); qFiles.splice(i, 1); renderImgPreview(); if (!qFiles.length) { show('img-preview', false); show('img-ph', true); } });
+        const r = new FileReader(); r.onload = e => img.src = e.target.result; r.readAsDataURL(f);
+        w.append(img, btn); c.appendChild(w);
     });
-}
-
-function handleFilesSelected(files) {
-    selectedFiles = selectedFiles.concat(files);
-    renderFileList();
 }
 
 function renderFileList() {
-    const list = document.getElementById('file-list');
-    list.innerHTML = '';
-    list.classList.remove('hidden');
-    document.getElementById('file-placeholder').classList.add('hidden');
-
-    selectedFiles.forEach((file, idx) => {
-        const item = document.createElement('div');
-        item.className = 'flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg mb-1.5';
-        item.innerHTML = `
-            <div class="flex-1 min-w-0 mr-3">
-                <p class="text-sm text-gray-800 truncate">${file.name}</p>
-                <p class="text-xs text-gray-400">${formatSize(file.size)}</p>
-            </div>
-            <button class="text-gray-400 hover:text-red-500 text-lg flex-shrink-0" onclick="removeFile(${idx})">x</button>
-        `;
-        list.appendChild(item);
+    const c = $('file-list'); c.innerHTML = ''; show('file-list', qFiles.length > 0); show('file-ph', !qFiles.length);
+    qFiles.forEach((f, i) => {
+        const d = document.createElement('div'); d.className = 'file-item';
+        d.innerHTML = `<span class="name">${esc(f.name)}</span><span class="size">${fmtSize(f.size)}</span>`;
+        const btn = document.createElement('button'); btn.className = 'remove-btn'; btn.textContent = '\u00d7';
+        btn.addEventListener('click', () => { qFiles.splice(i, 1); renderFileList(); });
+        d.appendChild(btn); c.appendChild(d);
     });
-
-    if (selectedFiles.length === 0) {
-        list.classList.add('hidden');
-        document.getElementById('file-placeholder').classList.remove('hidden');
-    }
 }
 
-function removeFile(idx) {
-    selectedFiles.splice(idx, 1);
-    renderFileList();
-}
-
-// --- Send ---
-
-async function send() {
-    const btn = document.getElementById('send-btn');
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-
+async function quickSend() {
+    const btn = $('q-send-btn'); btn.disabled = true; btn.textContent = 'Sending...';
     try {
-        let response;
-        const deleteAfter = document.getElementById('delete-after').checked;
-
-        if (currentType === 'text') {
-            const content = document.getElementById('text-content').value.trim();
-            if (!content) {
-                showToast('Please enter some text');
-                return;
-            }
-            response = await fetch('/api/share/text', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content, deleteAfterDownload: deleteAfter })
-            });
+        let resp;
+        const del = $('del-after').checked;
+        if (qType === 'text') {
+            const c = $('q-text').value.trim();
+            if (!c) { showToast('Enter text'); return; }
+            resp = await fetch('/api/share/text', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({content:c, deleteAfterDownload:del}) });
         } else {
-            if (selectedFiles.length === 0) {
-                showToast('Please select at least one file');
-                return;
-            }
-            const formData = new FormData();
-            selectedFiles.forEach(f => formData.append('file', f));
-            formData.append('type', currentType.toUpperCase());
-            formData.append('deleteAfterDownload', deleteAfter);
-            response = await fetch('/api/share/file', {
-                method: 'POST',
-                body: formData
+            if (!qFiles.length) { showToast('Select files'); return; }
+            const fd = new FormData(); qFiles.forEach(f => fd.append('file', f));
+            fd.append('type', qType.toUpperCase()); fd.append('deleteAfterDownload', del);
+            resp = await fetch('/api/share/file', { method:'POST', body:fd });
+        }
+        if (!resp.ok) throw new Error((await resp.json().catch(()=>({}))).message || 'Failed');
+        const data = await resp.json();
+        $('q-code').textContent = data.code;
+        show('q-result', true);
+        showToast('Sent!');
+    } catch(e) { showToast(e.message); }
+    finally { btn.disabled = false; btn.textContent = 'Send'; }
+}
+
+/* ==================== Quick Receive ==================== */
+async function quickRecv() {
+    const code = $('qr-code').value.trim().toUpperCase();
+    if (!code) { showToast('Enter a code'); return; }
+    show('qr-result', false); show('qr-error', false);
+    $('qr-result').innerHTML = '';
+    try {
+        const resp = await fetch('/api/share/' + code);
+        if (!resp.ok) throw new Error((await resp.json().catch(()=>({}))).message || 'Not found');
+        const data = await resp.json();
+        show('qr-result', true);
+        const el = $('qr-result');
+
+        if (data.type === 'TEXT') {
+            el.innerHTML = `<div class="card"><div class="timeline-header"><span class="badge text-type">TEXT</span><button class="btn-link" id="qr-copy">Copy</button></div><pre class="text-bubble">${esc(data.content)}</pre></div>`;
+            $('qr-copy').addEventListener('click', () => copyText(data.content));
+        } else if (data.type === 'IMAGE') {
+            let h = '<div class="card"><span class="badge image-type">IMAGES</span><div class="img-grid" style="margin-top:12px">';
+            data.files.forEach(f => { h += `<div class="img-card"><img src="/api/share/${code}/preview/${f.index}"><div class="img-footer"><span>${esc(f.fileName)}</span><button class="btn-link sm" data-url="/api/share/${code}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div></div>`; });
+            h += '</div></div>'; el.innerHTML = h;
+            el.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => dl(b.dataset.url, b.dataset.name)));
+        } else {
+            let h = '<div class="card"><span class="badge file-type">FILES</span><div style="margin-top:12px">';
+            data.files.forEach(f => { h += `<div class="dl-row"><div class="dl-info"><div class="dl-name">${esc(f.fileName)}</div><div class="dl-size">${fmtSize(f.fileSize)}</div></div><button class="btn btn-primary btn-sm" data-url="/api/share/${code}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div>`; });
+            h += '</div></div>'; el.innerHTML = h;
+            el.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => dl(b.dataset.url, b.dataset.name)));
+        }
+    } catch(e) {
+        show('qr-error', true);
+        $('qr-error').innerHTML = `<p>${esc(e.message)}</p>`;
+    }
+}
+
+/* ==================== Session Send ==================== */
+async function sessCreate() {
+    try {
+        const resp = await fetch('/api/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+        if (!resp.ok) throw new Error('Failed');
+        const data = await resp.json();
+        sessCode = data.code;
+        $('s-code').textContent = data.code;
+        show('s-create', false); show('s-active', true);
+        startTimer('s-timer', data.expireSeconds, sessClose);
+        showToast('Session: ' + data.code);
+    } catch(e) { showToast(e.message); }
+}
+
+function renderSessAttach() {
+    const bar = $('s-attachments');
+    bar.innerHTML = '';
+    show('s-attachments', sessAttach.length > 0);
+    sessAttach.forEach((f, i) => {
+        const tag = document.createElement('span'); tag.className = 'attach-tag';
+        tag.innerHTML = `<span class="tag-name">${esc(f.name)}</span>`;
+        const btn = document.createElement('button'); btn.className = 'tag-remove'; btn.textContent = '\u00d7';
+        btn.addEventListener('click', () => { sessAttach.splice(i, 1); renderSessAttach(); });
+        tag.appendChild(btn); bar.appendChild(tag);
+    });
+}
+
+async function sessSend() {
+    const text = $('s-text').value.trim();
+    const hasFiles = sessAttach.length > 0;
+    if (!text && !hasFiles) { showToast('Enter text or attach files'); return; }
+    const btn = $('s-send-btn'); btn.disabled = true;
+    try {
+        if (text) {
+            const r = await fetch('/api/session/'+sessCode+'/items/text', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({content:text}) });
+            if (!r.ok) throw new Error((await r.json().catch(()=>({}))).message || 'Failed');
+            $('s-text').value = '';
+        }
+        if (hasFiles) {
+            const fd = new FormData(); sessAttach.forEach(f => fd.append('file', f));
+            const r = await fetch('/api/session/'+sessCode+'/items/file', { method:'POST', body:fd });
+            if (!r.ok) throw new Error((await r.json().catch(()=>({}))).message || 'Failed');
+            sessAttach = []; renderSessAttach();
+        }
+        showToast('Sent');
+        refreshSessItems();
+    } catch(e) { showToast(e.message); }
+    finally { btn.disabled = false; }
+}
+
+async function refreshSessItems() {
+    if (!sessCode) return;
+    try {
+        const r = await fetch('/api/session/'+sessCode);
+        if (!r.ok) return;
+        const d = await r.json();
+        renderTimeline(d.items, sessCode, 's-items');
+    } catch(e) {}
+}
+
+async function sessClose() {
+    if (!sessCode) return;
+    try { await fetch('/api/session/'+sessCode, {method:'DELETE'}); } catch(e) {}
+    if (sessTimerId) { clearInterval(sessTimerId); sessTimerId = null; }
+    sessCode = null;
+    show('s-active', false); show('s-create', true);
+    $('s-items').innerHTML = '';
+    showToast('Session closed');
+}
+
+/* ==================== Session Receive ==================== */
+async function sessJoin() {
+    const code = $('sr-code').value.trim().toUpperCase();
+    if (!code) { showToast('Enter a code'); return; }
+    show('sr-error', false);
+    try {
+        const r = await fetch('/api/session/'+code);
+        if (!r.ok) throw new Error('Session not found');
+        const d = await r.json();
+        if (d.status === 'CLOSED') throw new Error('Session already closed');
+        recvCode = code;
+        show('sr-join', false); show('sr-active', true); show('sr-closed', false);
+        updateRecv(d);
+        recvPollId = setInterval(async () => {
+            try {
+                const r2 = await fetch('/api/session/'+recvCode);
+                if (!r2.ok) { onRecvClosed(); return; }
+                const d2 = await r2.json();
+                if (d2.status === 'CLOSED') { onRecvClosed(); return; }
+                updateRecv(d2);
+            } catch(e) { onRecvClosed(); }
+        }, 2000);
+    } catch(e) {
+        show('sr-error', true);
+        $('sr-error').innerHTML = `<p>${esc(e.message)}</p>`;
+    }
+}
+
+function updateRecv(data) {
+    $('sr-status').textContent = data.status;
+    $('sr-count').textContent = data.itemCount + ' items';
+    $('sr-timer').textContent = fmtTimer(data.remainingSeconds);
+    renderTimeline(data.items, data.code, 'sr-items');
+}
+
+function onRecvClosed() {
+    stopRecvPoll();
+    show('sr-closed', true);
+    $('sr-status').textContent = 'CLOSED';
+    $('sr-status').className = 'badge red';
+    $('sr-items').innerHTML = '<p class="muted" style="text-align:center;padding:20px">Content cleared.</p>';
+}
+
+function sessLeave() {
+    stopRecvPoll();
+    recvCode = null;
+    show('sr-active', false); show('sr-join', true); show('sr-closed', false);
+    $('sr-items').innerHTML = '';
+    $('sr-status').className = 'badge green';
+}
+
+function stopRecvPoll() {
+    if (recvPollId) { clearInterval(recvPollId); recvPollId = null; }
+}
+
+/* ==================== Timeline Renderer ==================== */
+function renderTimeline(items, code, containerId) {
+    const el = $(containerId);
+    if (!items || !items.length) { el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No items yet</p>'; el.dataset.n = '0'; return; }
+    if (el.dataset.n === String(items.length)) return; // skip re-render if unchanged
+    el.dataset.n = String(items.length);
+    el.innerHTML = '';
+
+    items.forEach(item => {
+        const card = document.createElement('div'); card.className = 'timeline-card';
+        const typeClass = item.type === 'TEXT' ? 'text-type' : item.type === 'IMAGE' ? 'image-type' : 'file-type';
+        let html = `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><span class="time-label">${fmtTime(item.addedAt)}</span></div>`;
+
+        if (item.type === 'TEXT') {
+            html += `<pre class="text-bubble">${esc(item.content)}</pre><div style="margin-top:8px"><button class="btn-link" data-copy="${esc(item.content)}">Copy</button></div>`;
+        } else if (item.type === 'IMAGE') {
+            html += '<div class="img-grid">';
+            (item.files||[]).forEach(f => {
+                html += `<div class="img-card"><img src="/api/session/${code}/items/${item.id}/preview/${f.index}"><div class="img-footer"><span>${esc(f.fileName)}</span><button class="btn-link sm" data-url="/api/session/${code}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div></div>`;
+            });
+            html += '</div>';
+        } else {
+            (item.files||[]).forEach(f => {
+                html += `<div class="dl-row"><div class="dl-info"><div class="dl-name">${esc(f.fileName)}</div><div class="dl-size">${fmtSize(f.fileSize)}</div></div><button class="btn btn-primary btn-sm" data-url="/api/session/${code}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div>`;
             });
         }
-
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.message || err.error || 'Send failed');
-        }
-
-        const data = await response.json();
-        currentShareCode = data.code;
-        document.getElementById('share-code').textContent = data.code;
-        document.getElementById('send-result').classList.remove('hidden');
-        showToast('Sent successfully!');
-    } catch (e) {
-        showToast(e.message);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Send';
-    }
-}
-
-// --- Receive ---
-
-async function receive() {
-    const code = document.getElementById('receive-code').value.trim().toUpperCase();
-    if (!code) {
-        showToast('Please enter a share code');
-        return;
-    }
-
-    // Reset
-    document.getElementById('receive-result').classList.add('hidden');
-    document.getElementById('receive-error').classList.add('hidden');
-    document.getElementById('result-text').classList.add('hidden');
-    document.getElementById('result-images').classList.add('hidden');
-    document.getElementById('result-files').classList.add('hidden');
-    document.getElementById('result-delete-warning').classList.add('hidden');
-
-    try {
-        const response = await fetch('/api/share/' + code);
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            throw new Error(err.message || err.error || 'Share not found');
-        }
-
-        const data = await response.json();
-        currentShareCode = code;
-
-        document.getElementById('receive-result').classList.remove('hidden');
-
-        if (data.deleteAfterDownload) {
-            document.getElementById('result-delete-warning').classList.remove('hidden');
-        }
-
-        switch (data.type) {
-            case 'TEXT':
-                document.getElementById('result-text').classList.remove('hidden');
-                document.getElementById('text-result-content').textContent = data.content;
-                break;
-            case 'IMAGE':
-                renderImageResults(data.files, code);
-                break;
-            case 'FILE':
-                renderFileResults(data.files, code);
-                break;
-        }
-    } catch (e) {
-        document.getElementById('receive-error').classList.remove('hidden');
-        document.getElementById('error-message').textContent = e.message;
-    }
-}
-
-function renderImageResults(files, code) {
-    const container = document.getElementById('result-images');
-    const grid = document.getElementById('image-results-grid');
-    grid.innerHTML = '';
-    container.classList.remove('hidden');
-
-    files.forEach(f => {
-        const card = document.createElement('div');
-        card.className = 'bg-gray-50 rounded-lg overflow-hidden';
-        card.innerHTML = `
-            <img src="/api/share/${code}/preview/${f.index}" class="w-full object-contain max-h-64" alt="${f.fileName}">
-            <div class="p-2 flex items-center justify-between">
-                <span class="text-xs text-gray-500 truncate">${f.fileName}</span>
-                <button class="text-xs text-blue-600 hover:text-blue-800 font-medium flex-shrink-0 ml-2" onclick="downloadSingle('${code}', ${f.index}, '${f.fileName}')">
-                    Download
-                </button>
-            </div>
-        `;
-        grid.appendChild(card);
+        card.innerHTML = html;
+        // Bind events
+        card.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copy)));
+        card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => dl(b.dataset.url, b.dataset.name)));
+        el.appendChild(card);
     });
 }
-
-function renderFileResults(files, code) {
-    const container = document.getElementById('result-files');
-    const list = document.getElementById('file-results-list');
-    list.innerHTML = '';
-    container.classList.remove('hidden');
-
-    files.forEach(f => {
-        const item = document.createElement('div');
-        item.className = 'flex items-center space-x-3 py-3 px-4 bg-gray-50 rounded-lg mb-2';
-        item.innerHTML = `
-            <svg class="h-8 w-8 text-blue-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            <div class="flex-1 min-w-0">
-                <p class="text-sm text-gray-800 font-medium truncate">${f.fileName}</p>
-                <p class="text-xs text-gray-400">${formatSize(f.fileSize)}</p>
-            </div>
-            <button class="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex-shrink-0" onclick="downloadSingle('${code}', ${f.index}, '${f.fileName}')">
-                Download
-            </button>
-        `;
-        list.appendChild(item);
-    });
-}
-
-// --- Actions ---
-
-function copyCode() {
-    const code = document.getElementById('share-code').textContent;
-    navigator.clipboard.writeText(code).then(() => showToast('Code copied!'));
-}
-
-function copyContent() {
-    const content = document.getElementById('text-result-content').textContent;
-    navigator.clipboard.writeText(content).then(() => showToast('Content copied!'));
-}
-
-function downloadSingle(code, index, fileName) {
-    const a = document.createElement('a');
-    a.href = '/api/share/' + code + '/download/' + index;
-    a.download = fileName || '';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-}
-
-function downloadAll() {
-    if (!currentShareCode) return;
-    const items = document.querySelectorAll('#file-results-list button, #image-results-grid button');
-    items.forEach(btn => btn.click());
-}
-
-// --- Utils ---
-
-function formatSize(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
-}
-
-function showToast(msg) {
-    const toast = document.getElementById('toast');
-    toast.textContent = msg;
-    toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 2000);
-}
-
-// --- Init ---
-
-document.addEventListener('DOMContentLoaded', () => {
-    setupDropZone('image-drop-zone', 'image-input', handleImages);
-    setupDropZone('file-drop-zone', 'file-input', handleFilesSelected);
-});
