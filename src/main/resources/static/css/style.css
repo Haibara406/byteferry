@@ -37,6 +37,8 @@ header {
     position: sticky; top: 0; z-index: 10;
 }
 .header-inner { display: flex; align-items: center; justify-content: space-between; height: 56px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.user-name { font-size: 0.8125rem; font-weight: 500; color: var(--blue); }
 .logo { font-size: 1.25rem; font-weight: 700; color: var(--text); }
 .accent { color: var(--blue); }
 
@@ -384,10 +386,59 @@ header {
 }
 .fade-in { animation: slideUp 0.3s ease; }
 
+/* ==================== Modal ==================== */
+.modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+    animation: fadeIn 0.2s ease;
+}
+.modal-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    width: 380px; max-width: 90vw;
+    overflow: hidden;
+    animation: slideUp 0.3s ease;
+}
+.modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.modal-close {
+    background: none; border: none; font-size: 1.5rem;
+    color: var(--text3); cursor: pointer; line-height: 1;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 20px; }
+.input {
+    width: 100%; padding: 10px 14px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-size: 0.875rem; font-family: inherit; outline: none;
+    transition: border-color var(--transition);
+}
+.input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(79,110,247,0.1); }
+.success-card {
+    background: #f0fdf4; border: 1px solid #bbf7d0;
+    border-radius: var(--radius); padding: 14px;
+    color: #16a34a; font-size: 0.875rem;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ==================== Delete button in timeline ==================== */
+.timeline-delete {
+    background: none; border: none; color: var(--text3);
+    cursor: pointer; font-size: 0.75rem;
+    transition: color var(--transition);
+}
+.timeline-delete:hover { color: var(--red); }
+
 /* ==================== Responsive ==================== */
 @media (max-width: 480px) {
     .code-display { font-size: 1.75rem; }
     .code-display.small { font-size: 1.25rem; }
     .code-input { font-size: 1.25rem; }
     .img-grid { grid-template-columns: 1fr; }
+    .header-right { gap: 8px; }
 }

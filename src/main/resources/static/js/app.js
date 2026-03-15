@@ -2,6 +2,7 @@
 let qType = 'text', qFiles = [];
 let sessCode = null, sessAttach = [], sessTimerId = null;
 let recvCode = null, recvPollId = null;
+let spAttach = [], spPollId = null;
 
 /* ==================== DOM Ready ==================== */
 document.addEventListener('DOMContentLoaded', () => {
@@ -12,7 +13,10 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             show('view-quick', btn.dataset.mode === 'quick');
             show('view-session', btn.dataset.mode === 'session');
+            show('view-space', btn.dataset.mode === 'space');
             if (btn.dataset.mode !== 'session') stopRecvPoll();
+            if (btn.dataset.mode === 'space') refreshSpace();
+            else stopSpacePoll();
         });
     });
 
@@ -65,6 +69,25 @@ document.addEventListener('DOMContentLoaded', () => {
     $('sr-code').addEventListener('keydown', e => { if (e.key === 'Enter') sessJoin(); });
     $('sr-leave-btn').addEventListener('click', sessLeave);
     $('sr-closed-leave').addEventListener('click', sessLeave);
+
+    // Auth
+    $('login-btn').addEventListener('click', () => show('auth-modal', true));
+    $('auth-close').addEventListener('click', () => show('auth-modal', false));
+    $('auth-modal').addEventListener('click', e => { if (e.target === $('auth-modal')) show('auth-modal', false); });
+    bindTabs('auth-nav', { 'auth-login-form': 'auth-login-form', 'auth-reg-form': 'auth-reg-form' });
+    $('auth-login-form').addEventListener('submit', loginSubmit);
+    $('auth-reg-form').addEventListener('submit', registerSubmit);
+    $('logout-btn').addEventListener('click', logout);
+
+    // Space
+    $('sp-attach-file-btn').addEventListener('click', () => $('sp-file-in').click());
+    $('sp-attach-img-btn').addEventListener('click', () => $('sp-img-in').click());
+    $('sp-file-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
+    $('sp-img-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
+    $('sp-send-btn').addEventListener('click', spaceAdd);
+
+    // Restore session
+    restoreAuth();
 });
 
 /* ==================== Helpers ==================== */
@@ -369,4 +392,201 @@ function renderTimeline(items, code, containerId) {
         card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => dl(b.dataset.url, b.dataset.name)));
         el.appendChild(card);
     });
+}
+
+/* ==================== Auth ==================== */
+function getToken() { return localStorage.getItem('bf_token'); }
+function getUser() { return localStorage.getItem('bf_user'); }
+
+function authHeader() {
+    const t = getToken();
+    return t ? { 'Authorization': 'Bearer ' + t } : {};
+}
+
+function restoreAuth() {
+    if (getToken() && getUser()) {
+        onLogin(getUser());
+    }
+}
+
+function onLogin(username) {
+    show('user-area', false);
+    show('user-info', true);
+    $('user-display').textContent = username;
+    show('nav-space', true);
+}
+
+function logout() {
+    localStorage.removeItem('bf_token');
+    localStorage.removeItem('bf_user');
+    show('user-area', true);
+    show('user-info', false);
+    show('nav-space', false);
+    stopSpacePoll();
+    // If on space tab, switch to quick
+    if (!$('view-space').classList.contains('hidden')) {
+        document.querySelector('#mode-nav .pill[data-mode="quick"]').click();
+    }
+    showToast('Logged out');
+}
+
+async function loginSubmit(e) {
+    e.preventDefault();
+    show('login-error', false);
+    const user = $('login-user').value.trim();
+    const pass = $('login-pass').value;
+    try {
+        const r = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Login failed');
+        const d = await r.json();
+        localStorage.setItem('bf_token', d.token);
+        localStorage.setItem('bf_user', d.username);
+        onLogin(d.username);
+        show('auth-modal', false);
+        showToast('Welcome, ' + d.username);
+    } catch (err) {
+        show('login-error', true);
+        $('login-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+async function registerSubmit(e) {
+    e.preventDefault();
+    show('reg-error', false); show('reg-ok', false);
+    const user = $('reg-user').value.trim();
+    const pass = $('reg-pass').value;
+    try {
+        const r = await fetch('/api/auth/register', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: user, password: pass })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Registration failed');
+        show('reg-ok', true);
+        $('reg-ok').innerHTML = '<p>Registered! You can now login.</p>';
+    } catch (err) {
+        show('reg-error', true);
+        $('reg-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+/* ==================== Space ==================== */
+function renderSpAttach() {
+    const bar = $('sp-attachments');
+    bar.innerHTML = '';
+    show('sp-attachments', spAttach.length > 0);
+    spAttach.forEach((f, i) => {
+        const tag = document.createElement('span'); tag.className = 'attach-tag';
+        tag.innerHTML = `<span class="tag-name">${esc(f.name)}</span>`;
+        const btn = document.createElement('button'); btn.className = 'tag-remove'; btn.textContent = '\u00d7';
+        btn.addEventListener('click', () => { spAttach.splice(i, 1); renderSpAttach(); });
+        tag.appendChild(btn); bar.appendChild(tag);
+    });
+}
+
+async function spaceAdd() {
+    const text = $('sp-text').value.trim();
+    const hasFiles = spAttach.length > 0;
+    if (!text && !hasFiles) { showToast('Enter text or attach files'); return; }
+    const btn = $('sp-send-btn'); btn.disabled = true;
+    try {
+        if (text) {
+            const r = await fetch('/api/space/items/text', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeader() },
+                body: JSON.stringify({ content: text })
+            });
+            if (r.status === 401) { onAuthFail(); return; }
+            if (!r.ok) throw new Error('Failed');
+            $('sp-text').value = '';
+        }
+        if (hasFiles) {
+            const fd = new FormData();
+            spAttach.forEach(f => fd.append('file', f));
+            const r = await fetch('/api/space/items/file', {
+                method: 'POST', headers: authHeader(), body: fd
+            });
+            if (r.status === 401) { onAuthFail(); return; }
+            if (!r.ok) throw new Error('Failed');
+            spAttach = []; renderSpAttach();
+        }
+        showToast('Added');
+        refreshSpace();
+    } catch (e) { showToast(e.message); }
+    finally { btn.disabled = false; }
+}
+
+async function refreshSpace() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/space/items', { headers: authHeader() });
+        if (r.status === 401) { onAuthFail(); return; }
+        if (!r.ok) return;
+        const items = await r.json();
+        renderSpaceItems(items);
+    } catch (e) { /* ignore */ }
+    // Start polling if not already
+    if (!spPollId) {
+        spPollId = setInterval(refreshSpace, 10000);
+    }
+}
+
+function stopSpacePoll() {
+    if (spPollId) { clearInterval(spPollId); spPollId = null; }
+}
+
+function renderSpaceItems(items) {
+    const el = $('sp-items');
+    if (!items || !items.length) {
+        el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">Your space is empty</p>';
+        el.dataset.n = '0';
+        return;
+    }
+    if (el.dataset.n === String(items.length)) return;
+    el.dataset.n = String(items.length);
+    el.innerHTML = '';
+
+    items.forEach(item => {
+        const card = document.createElement('div'); card.className = 'timeline-card';
+        const typeClass = item.type === 'TEXT' ? 'text-type' : item.type === 'IMAGE' ? 'image-type' : 'file-type';
+        let html = `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><div class="row gap-sm"><span class="time-label">${fmtTime(item.createdAt)}</span><button class="timeline-delete" data-del="${item.id}">Delete</button></div></div>`;
+
+        if (item.type === 'TEXT') {
+            html += `<pre class="text-bubble">${esc(item.content)}</pre><div style="margin-top:8px"><button class="btn-link" data-copy="${esc(item.content)}">Copy</button></div>`;
+        } else if (item.type === 'IMAGE') {
+            html += '<div class="img-grid">';
+            (item.files || []).forEach(f => {
+                html += `<div class="img-card"><img src="/api/space/items/${item.id}/files/${f.id}/preview"><div class="img-footer"><span>${esc(f.fileName)}</span><button class="btn-link sm" data-url="/api/space/items/${item.id}/files/${f.id}/download" data-name="${esc(f.fileName)}">Download</button></div></div>`;
+            });
+            html += '</div>';
+        } else {
+            (item.files || []).forEach(f => {
+                html += `<div class="dl-row"><div class="dl-info"><div class="dl-name">${esc(f.fileName)}</div><div class="dl-size">${fmtSize(f.fileSize)}</div></div><button class="btn btn-primary btn-sm" data-url="/api/space/items/${item.id}/files/${f.id}/download" data-name="${esc(f.fileName)}">Download</button></div>`;
+            });
+        }
+        card.innerHTML = html;
+        card.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copy)));
+        card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = b.dataset.url;
+            // Add auth token as query param for authenticated downloads
+            a.href += (a.href.includes('?') ? '&' : '?') + 'token=' + getToken();
+            a.download = b.dataset.name || '';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }));
+        card.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+            await fetch('/api/space/items/' + b.dataset.del, { method: 'DELETE', headers: authHeader() });
+            el.dataset.n = '0'; // force re-render
+            refreshSpace();
+        }));
+        el.appendChild(card);
+    });
+}
+
+function onAuthFail() {
+    logout();
+    show('auth-modal', true);
+    showToast('Session expired, please login again');
 }

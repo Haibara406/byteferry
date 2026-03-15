@@ -47,12 +47,12 @@
 
 > Login-based features, requires MySQL
 
-- [ ] User registration & login (username + password)
-- [ ] JWT token authentication
-- [ ] MySQL database for user data
-- [ ] Personal shared space: logged-in user has a dedicated page showing all their shared content
-- [ ] Multi-device sync: same account on multiple devices sees the same shared space
-- [ ] Shared space content management (delete, view history)
+- [x] # User registration & login (username + password)
+- [x] # JWT token authentication
+- [x] # MySQL database for user data
+- [x] # Personal shared space: logged-in user has a dedicated page showing all their shared content
+- [x] # Multi-device sync: same account on multiple devices sees the same shared space
+- [x] # Shared space content management (delete, view history)
 - [ ] Clipboard sync across devices (WebSocket real-time push)
 
 ---
