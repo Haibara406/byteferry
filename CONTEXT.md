@@ -14,7 +14,7 @@ ByteFerry 是一个 **跨设备剪切板共享 / 文件传输 Web 工具**。用
 |------|------|-------------|
 | **Quick（令牌码快传）** | 一次性分享码，发送内容后获得 6 位码，接收方输入码获取内容 | 不需要 |
 | **Session（会话模式）** | 一个码开一个持久会话，发送方可持续推送多条内容，接收方实时接收 | 不需要 |
-| **Multi-device（多设备同步）** | 同一账号在多设备间共享剪切板内容 | 需要登录 |
+| **Multi-device（多设备同步）** | 同一账号的个人空间（Space），多设备通过 WebSocket 实时同步内容 | 需要登录 |
 | **Friend Session（好友会话）** | 好友间开启双向传输会话 | 需要登录 |
 
 ---
@@ -27,6 +27,7 @@ ByteFerry 是一个 **跨设备剪切板共享 / 文件传输 Web 工具**。用
 | 缓存/临时存储 | Redis（密码连接，host: localhost:6379） |
 | 数据库 | MySQL 8.0（localhost:3306/byteferry, root/Ww249260523..） |
 | 认证 | Spring Security + JWT（jjwt 0.12.6, BCrypt 密码加密） |
+| 实时通信 | WebSocket（原生，用于 Space 多设备同步） |
 | 文件存储 | 本地磁盘 `~/.byteferry/files/`（UUID 前缀命名） |
 | 前端 | 纯 HTML + 自定义 CSS + 原生 JS（无框架、无 CDN 依赖） |
 | 构建工具 | Maven |
@@ -55,7 +56,10 @@ ByteFerry/
 │   │   ├── RedisConfig.java             # Redis 序列化配置（Jackson + 类型信息）
 │   │   ├── SecurityConfig.java          # Spring Security 配置（JWT 认证）
 │   │   ├── JwtUtil.java                 # JWT 生成/验证工具
-│   │   └── JwtAuthFilter.java           # JWT 认证过滤器（支持 Header + query param）
+│   │   ├── JwtAuthFilter.java           # JWT 认证过滤器（支持 Header + query param）
+│   │   └── WebSocketConfig.java         # WebSocket 配置（注册 /ws/space 端点）
+│   ├── websocket/
+│   │   └── SpaceWebSocketHandler.java   # Space WebSocket 处理器（按 userId 推送）
 │   ├── controller/
 │   │   ├── ShareController.java         # Quick 模式 REST API
 │   │   ├── SessionController.java       # Session 模式 REST API
@@ -78,6 +82,8 @@ ByteFerry/
 │   │   ├── FileStorageService.java      # 文件存储服务
 │   │   ├── AuthService.java             # 注册/登录/BCrypt
 │   │   └── SpaceService.java            # 个人空间 CRUD
+│   ├── task/
+│   │   └── SpaceCleanupTask.java        # Space 过期 item 定时清理（30s）
 │   └── util/
 │       └── CodeGenerator.java           # 6 位分享码生成器（A-Z + 0-9）
 ├── src/main/resources/
@@ -135,7 +141,7 @@ ByteFerry/
 - `nextItemId`: 自增序号
 
 **Session 行为：**
-- 发送方创建 Session → 获得 6 位 code
+- 发送方创建 Session → 选择过期时间（10min/30min/1h/2h）→ 获得 6 位 code
 - 发送方可持续添加 text/image/file（统一输入窗口，支持文本和附件同时发送）
 - 接收方输入 code 加入 → 2 秒轮询获取新内容
 - 发送方可关闭 Session → 文件被删除 → 保留 CLOSED 状态 60 秒 → 接收方检测到关闭
@@ -158,7 +164,7 @@ ByteFerry/
 - Session 接收方：timeline 卡片列表，2 秒轮询自动刷新
 - 响应式移动端适配
 
-### 4.3 用户系统 & 个人空间（Phase 3）
+### 4.4 用户系统 & 个人空间（Phase 3）
 
 **MySQL 表：** users, space_items, space_files（JPA 自动建表）
 
@@ -174,25 +180,38 @@ ByteFerry/
 
 | 端点 | 说明 |
 |------|------|
-| `GET /api/space/items` | 获取当前用户所有 items（按时间倒序） |
-| `POST /api/space/items/text` | 添加文本 |
-| `POST /api/space/items/file` | 添加文件/图片（支持批量） |
+| `GET /api/space/items` | 获取当前用户未过期 items（按时间倒序，含 remainingSeconds） |
+| `POST /api/space/items/text` | 添加文本（支持 expireSeconds 参数） |
+| `POST /api/space/items/file` | 添加文件/图片（支持批量，支持 expireSeconds 参数） |
 | `DELETE /api/space/items/{id}` | 删除 item + 关联文件 |
+| `DELETE /api/space/items/clear` | 清空所有 items |
 | `GET /api/space/items/{itemId}/files/{fileId}/preview` | 预览 |
 | `GET /api/space/items/{itemId}/files/{fileId}/download` | 下载 |
+
+**WebSocket：**
+- 端点：`/ws/space?token=<jwt>`
+- 消息类型：`"refresh"` = 数据变化，`"empty"` = 无存活 items
+- 有存活 items 时连接，所有 items 过期/删除/清空后断开
+- 断连后自动回退到 10 秒轮询
+
+**Space 过期机制：**
+- 每条 item 有独立 `expireAt`，用户添加时选择过期时间（10min/30min/1h/2h）
+- 定时任务每 30 秒清理过期 items 和磁盘文件
+- 前端每条 item 显示倒计时
 
 **认证方式：**
 - JWT token，72 小时过期
 - 请求头 `Authorization: Bearer <token>` 或 query param `?token=<token>`（用于文件下载）
 - BCrypt 密码加密
-- Spring Security 放行 `/api/auth/**`, `/api/share/**`, `/api/session/**`, 静态资源
+- Spring Security 放行 `/api/auth/**`, `/api/share/**`, `/api/session/**`, `/ws/**`, 静态资源
 
 **前端：**
 - Header 右侧：未登录显示 Login 按钮，已登录显示用户名 + Logout
 - Login/Register 模态框（标签切换）
 - Space 作为第三个顶层 tab（仅登录后可见）
-- Space 视图：composer 输入 + timeline 列表（10 秒轮询同步）
-- 每条 item 支持 复制/预览/下载/删除
+- Space 视图：过期时间选择器 + Clear All 按钮 + composer 输入 + timeline 列表
+- Space 实时同步：WebSocket 推送（有存活 items 时连接），断连自动回退轮询
+- 每条 item 支持 复制/预览/下载/删除，显示剩余时间倒计时
 - Token 存 localStorage，401 时自动弹出登录框
 
 ---
@@ -208,6 +227,8 @@ ByteFerry/
 7. **JWT 支持 query param 传递** — `<a>` 标签下载无法设置 Authorization header，JwtAuthFilter 同时检查 `?token=`
 8. **Spring Security 无状态** — `SessionCreationPolicy.STATELESS`，不创建 HTTP session
 9. **Space 文件下载用 token query param** — 前端 JS 在下载 URL 后拼接 `?token=` 解决认证问题
+10. **Space WebSocket 按需连接** — 有存活 items 时才连接，空了发 `"empty"` 断开，断连回退到 10s 轮询
+11. **Space item 过期由前端倒计时 + 后端定时清理配合** — 前端倒计时到 0 立刻刷新（用户感知精确），后端 30s 定时清理磁盘文件和 DB 记录（后台无感）
 
 ---
 
@@ -242,11 +263,11 @@ byteferry.jwt.expiration-hours: 72              # JWT 72 小时过期
 
 ### Phase 2 剩余
 
-- [ ] 自定义过期时间选择 UI（Session 创建时可选择过期时长）
+（无）
 
 ### Phase 3 剩余
 
-- [ ] 跨设备剪切板同步（WebSocket 实时推送）
+（无）
 
 ### Phase 4 — 好友系统 & 双向会话
 

@@ -27,6 +27,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/share/**").permitAll()
                 .requestMatchers("/api/session/**").permitAll()
+                .requestMatchers("/ws/**").permitAll()
                 .requestMatchers("/", "/index.html", "/css/**", "/js/**", "/favicon.ico").permitAll()
                 .requestMatchers("/api/space/**").authenticated()
                 .anyRequest().permitAll()

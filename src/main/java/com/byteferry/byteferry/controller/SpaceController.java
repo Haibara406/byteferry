@@ -4,6 +4,7 @@ import com.byteferry.byteferry.model.entity.SpaceFile;
 import com.byteferry.byteferry.model.entity.SpaceItem;
 import com.byteferry.byteferry.service.FileStorageService;
 import com.byteferry.byteferry.service.SpaceService;
+import com.byteferry.byteferry.websocket.SpaceWebSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
@@ -22,6 +23,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,8 +35,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class SpaceController {
 
+    private static final int DEFAULT_EXPIRE_SECONDS = 1800;
+
     private final SpaceService spaceService;
     private final FileStorageService fileStorageService;
+    private final SpaceWebSocketHandler spaceWsHandler;
 
     private Long getUserId(Authentication auth) {
         if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
@@ -51,33 +57,54 @@ public class SpaceController {
     }
 
     @PostMapping("/items/text")
-    public ResponseEntity<Map<String, Object>> addText(Authentication auth, @RequestBody Map<String, String> body) {
-        String content = body.get("content");
+    public ResponseEntity<Map<String, Object>> addText(Authentication auth, @RequestBody Map<String, Object> body) {
+        String content = body.get("content") != null ? body.get("content").toString() : null;
         if (content == null || content.isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Content required");
         }
-        SpaceItem item = spaceService.addText(getUserId(auth), content);
+        int expire = parseExpire(body.get("expireSeconds"));
+        Long userId = getUserId(auth);
+        SpaceItem item = spaceService.addText(userId, content, expire);
+        spaceWsHandler.notifyUser(userId);
         return ResponseEntity.ok(mapItem(item));
     }
 
     @PostMapping("/items/file")
     public ResponseEntity<Map<String, Object>> addFiles(Authentication auth,
-            @RequestParam("file") MultipartFile[] files) throws IOException {
+            @RequestParam("file") MultipartFile[] files,
+            @RequestParam(value = "expireSeconds", required = false) Integer expireSeconds) throws IOException {
         if (files.length == 0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Files required");
         }
-        SpaceItem item = spaceService.addFiles(getUserId(auth), files);
+        int expire = expireSeconds != null && expireSeconds > 0 ? Math.min(expireSeconds, 7200) : DEFAULT_EXPIRE_SECONDS;
+        Long userId = getUserId(auth);
+        SpaceItem item = spaceService.addFiles(userId, files, expire);
+        spaceWsHandler.notifyUser(userId);
         return ResponseEntity.ok(mapItem(item));
     }
 
     @DeleteMapping("/items/{id}")
     public ResponseEntity<Map<String, String>> deleteItem(Authentication auth, @PathVariable Long id) {
         try {
-            spaceService.deleteItem(getUserId(auth), id);
+            Long userId = getUserId(auth);
+            spaceService.deleteItem(userId, id);
+            if (spaceService.hasActiveItems(userId)) {
+                spaceWsHandler.notifyUser(userId);
+            } else {
+                spaceWsHandler.notifyEmpty(userId);
+            }
             return ResponseEntity.ok(Map.of("message", "Deleted"));
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
+    }
+
+    @DeleteMapping("/items/clear")
+    public ResponseEntity<Map<String, String>> clearAll(Authentication auth) {
+        Long userId = getUserId(auth);
+        spaceService.clearAll(userId);
+        spaceWsHandler.notifyEmpty(userId);
+        return ResponseEntity.ok(Map.of("message", "Cleared"));
     }
 
     @GetMapping("/items/{itemId}/files/{fileId}/preview")
@@ -123,6 +150,12 @@ public class SpaceController {
         map.put("content", item.getContent() != null ? item.getContent() : "");
         map.put("createdAt", item.getCreatedAt().toString());
 
+        if (item.getExpireAt() != null) {
+            map.put("expireAt", item.getExpireAt().toString());
+            long remaining = ChronoUnit.SECONDS.between(LocalDateTime.now(), item.getExpireAt());
+            map.put("remainingSeconds", Math.max(remaining, 0));
+        }
+
         List<Map<String, Object>> files = new ArrayList<>();
         for (SpaceFile sf : item.getFiles()) {
             Map<String, Object> fm = new HashMap<>();
@@ -134,5 +167,15 @@ public class SpaceController {
         }
         map.put("files", files);
         return map;
+    }
+
+    private int parseExpire(Object val) {
+        if (val == null) return DEFAULT_EXPIRE_SECONDS;
+        try {
+            int v = Integer.parseInt(val.toString());
+            return v > 0 ? Math.min(v, 7200) : DEFAULT_EXPIRE_SECONDS;
+        } catch (NumberFormatException e) {
+            return DEFAULT_EXPIRE_SECONDS;
+        }
     }
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ByteFerry - 跨设备传输</title>
+    <title>ByteFerry - Cross-device transmission</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -44,13 +44,13 @@
                     <button class="type-chip" data-type="file">File</button>
                 </div>
                 <div class="input-area" id="ia-text">
-                    <textarea id="q-text" class="textarea" placeholder="Paste or type text here..." rows="7"></textarea>
+                    <textarea id="q-text" class="textarea" placeholder="Paste or type text here..." rows="8"></textarea>
                 </div>
                 <div class="input-area hidden" id="ia-image">
                     <div class="dropzone" id="dz-image">
                         <div id="img-preview" class="preview-grid hidden"></div>
                         <div id="img-ph" class="dz-placeholder">
-                            <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
                             <p>Drop images or click to select</p>
                         </div>
                         <input id="img-input" type="file" accept="image/*" multiple hidden>
@@ -60,7 +60,7 @@
                     <div class="dropzone" id="dz-file">
                         <div id="file-list" class="file-list hidden"></div>
                         <div id="file-ph" class="dz-placeholder">
-                            <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                            <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
                             <p>Drop files or click to select</p>
                             <small>Max 100MB each</small>
                         </div>
@@ -100,9 +100,18 @@
             <!-- Session Send -->
             <section class="panel fade-in" id="s-send">
                 <div id="s-create" class="card center-content">
-                    <svg width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24" class="accent-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+                    <svg width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24" class="accent-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
                     <h2>Create a Session</h2>
                     <p class="muted">Open a persistent channel. Send multiple items with one code.</p>
+                    <div style="margin-bottom: 16px">
+                        <label class="label">Session Duration</label>
+                        <div class="type-bar" id="expire-bar" style="justify-content:center">
+                            <button class="type-chip" data-expire="600">10 min</button>
+                            <button class="type-chip active" data-expire="1800">30 min</button>
+                            <button class="type-chip" data-expire="3600">1 hour</button>
+                            <button class="type-chip" data-expire="7200">2 hours</button>
+                        </div>
+                    </div>
                     <button class="btn btn-primary" id="s-create-btn">Create Session</button>
                 </div>
                 <div id="s-active" class="hidden">
@@ -116,7 +125,7 @@
                     </div>
                     <!-- Unified input -->
                     <div class="composer">
-                        <textarea id="s-text" class="composer-text" rows="2" placeholder="Type a message..."></textarea>
+                        <textarea id="s-text" class="composer-text" rows="3" placeholder="Type a message..."></textarea>
                         <div id="s-attachments" class="attach-bar hidden"></div>
                         <div class="composer-toolbar">
                             <div class="toolbar-left">
@@ -168,9 +177,19 @@
 
         <!-- ==================== SPACE MODE ==================== -->
         <div class="view hidden" id="view-space">
+            <!-- Expire selector + Clear -->
+            <div class="row spread" style="margin-bottom: 12px">
+                <div class="type-bar" id="sp-expire-bar">
+                    <button class="type-chip" data-expire="600">10 min</button>
+                    <button class="type-chip active" data-expire="1800">30 min</button>
+                    <button class="type-chip" data-expire="3600">1 hour</button>
+                    <button class="type-chip" data-expire="7200">2 hours</button>
+                </div>
+                <button class="btn-link danger btn-sm" id="sp-clear-btn">Clear All</button>
+            </div>
             <!-- Composer -->
             <div class="composer">
-                <textarea id="sp-text" class="composer-text" rows="2" placeholder="Add text to your space..."></textarea>
+                <textarea id="sp-text" class="composer-text" rows="3" placeholder="Add text to your space..."></textarea>
                 <div id="sp-attachments" class="attach-bar hidden"></div>
                 <div class="composer-toolbar">
                     <div class="toolbar-left">

@@ -2,7 +2,7 @@
 let qType = 'text', qFiles = [];
 let sessCode = null, sessAttach = [], sessTimerId = null;
 let recvCode = null, recvPollId = null;
-let spAttach = [], spPollId = null;
+let spAttach = [], spPollId = null, spWs = null;
 
 /* ==================== DOM Ready ==================== */
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,8 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
             show('view-session', btn.dataset.mode === 'session');
             show('view-space', btn.dataset.mode === 'space');
             if (btn.dataset.mode !== 'session') stopRecvPoll();
-            if (btn.dataset.mode === 'space') refreshSpace();
-            else stopSpacePoll();
+            if (btn.dataset.mode === 'space') { refreshSpace(); connectSpaceWS(); }
+            else { stopSpacePoll(); disconnectSpaceWS(); }
         });
     });
 
@@ -51,6 +51,14 @@ document.addEventListener('DOMContentLoaded', () => {
     $('qr-get-btn').addEventListener('click', quickRecv);
     $('qr-code').addEventListener('keydown', e => { if (e.key === 'Enter') quickRecv(); });
 
+    // Session expire chips
+    document.querySelectorAll('#expire-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#expire-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
     // Session create
     $('s-create-btn').addEventListener('click', sessCreate);
     $('s-copy-code').addEventListener('click', () => copyText($('s-code').textContent));
@@ -80,6 +88,13 @@ document.addEventListener('DOMContentLoaded', () => {
     $('logout-btn').addEventListener('click', logout);
 
     // Space
+    document.querySelectorAll('#sp-expire-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#sp-expire-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    $('sp-clear-btn').addEventListener('click', spaceClearAll);
     $('sp-attach-file-btn').addEventListener('click', () => $('sp-file-in').click());
     $('sp-attach-img-btn').addEventListener('click', () => $('sp-img-in').click());
     $('sp-file-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
@@ -238,7 +253,9 @@ async function quickRecv() {
 /* ==================== Session Send ==================== */
 async function sessCreate() {
     try {
-        const resp = await fetch('/api/session', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' });
+        const activeChip = document.querySelector('#expire-bar .type-chip.active');
+        const expireSeconds = activeChip ? parseInt(activeChip.dataset.expire) : 1800;
+        const resp = await fetch('/api/session', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ expireSeconds }) });
         if (!resp.ok) throw new Error('Failed');
         const data = await resp.json();
         sessCode = data.code;
@@ -423,6 +440,7 @@ function logout() {
     show('user-info', false);
     show('nav-space', false);
     stopSpacePoll();
+    disconnectSpaceWS();
     // If on space tab, switch to quick
     if (!$('view-space').classList.contains('hidden')) {
         document.querySelector('#mode-nav .pill[data-mode="quick"]').click();
@@ -490,13 +508,15 @@ async function spaceAdd() {
     const text = $('sp-text').value.trim();
     const hasFiles = spAttach.length > 0;
     if (!text && !hasFiles) { showToast('Enter text or attach files'); return; }
+    const activeChip = document.querySelector('#sp-expire-bar .type-chip.active');
+    const expireSeconds = activeChip ? parseInt(activeChip.dataset.expire) : 1800;
     const btn = $('sp-send-btn'); btn.disabled = true;
     try {
         if (text) {
             const r = await fetch('/api/space/items/text', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...authHeader() },
-                body: JSON.stringify({ content: text })
+                body: JSON.stringify({ content: text, expireSeconds })
             });
             if (r.status === 401) { onAuthFail(); return; }
             if (!r.ok) throw new Error('Failed');
@@ -505,6 +525,7 @@ async function spaceAdd() {
         if (hasFiles) {
             const fd = new FormData();
             spAttach.forEach(f => fd.append('file', f));
+            fd.append('expireSeconds', expireSeconds);
             const r = await fetch('/api/space/items/file', {
                 method: 'POST', headers: authHeader(), body: fd
             });
@@ -514,6 +535,7 @@ async function spaceAdd() {
         }
         showToast('Added');
         refreshSpace();
+        connectSpaceWS();
     } catch (e) { showToast(e.message); }
     finally { btn.disabled = false; }
 }
@@ -526,11 +548,21 @@ async function refreshSpace() {
         if (!r.ok) return;
         const items = await r.json();
         renderSpaceItems(items);
+        // Connect WebSocket if there are items, disconnect if empty
+        if (items.length > 0) connectSpaceWS();
     } catch (e) { /* ignore */ }
-    // Start polling if not already
-    if (!spPollId) {
-        spPollId = setInterval(refreshSpace, 10000);
-    }
+}
+
+async function spaceClearAll() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/space/items/clear', { method: 'DELETE', headers: authHeader() });
+        if (r.status === 401) { onAuthFail(); return; }
+        $('sp-items').dataset.n = '0';
+        $('sp-items').innerHTML = '<p class="muted" style="text-align:center;padding:24px">Your space is empty</p>';
+        disconnectSpaceWS();
+        showToast('Cleared');
+    } catch (e) { showToast(e.message); }
 }
 
 function stopSpacePoll() {
@@ -544,14 +576,21 @@ function renderSpaceItems(items) {
         el.dataset.n = '0';
         return;
     }
-    if (el.dataset.n === String(items.length)) return;
+    // Always re-render to update countdown timers
     el.dataset.n = String(items.length);
     el.innerHTML = '';
 
     items.forEach(item => {
         const card = document.createElement('div'); card.className = 'timeline-card';
         const typeClass = item.type === 'TEXT' ? 'text-type' : item.type === 'IMAGE' ? 'image-type' : 'file-type';
-        let html = `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><div class="row gap-sm"><span class="time-label">${fmtTime(item.createdAt)}</span><button class="timeline-delete" data-del="${item.id}">Delete</button></div></div>`;
+
+        // Build timer label
+        let timerHtml = '';
+        if (item.remainingSeconds != null) {
+            timerHtml = `<span class="time-label sp-countdown" data-remaining="${item.remainingSeconds}">${fmtTimer(item.remainingSeconds)}</span>`;
+        }
+
+        let html = `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><div class="row gap-sm">${timerHtml}<span class="time-label">${fmtTime(item.createdAt)}</span><button class="timeline-delete" data-del="${item.id}">Delete</button></div></div>`;
 
         if (item.type === 'TEXT') {
             html += `<pre class="text-bubble">${esc(item.content)}</pre><div style="margin-top:8px"><button class="btn-link" data-copy="${esc(item.content)}">Copy</button></div>`;
@@ -571,22 +610,73 @@ function renderSpaceItems(items) {
         card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => {
             const a = document.createElement('a');
             a.href = b.dataset.url;
-            // Add auth token as query param for authenticated downloads
             a.href += (a.href.includes('?') ? '&' : '?') + 'token=' + getToken();
             a.download = b.dataset.name || '';
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
         }));
         card.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
             await fetch('/api/space/items/' + b.dataset.del, { method: 'DELETE', headers: authHeader() });
-            el.dataset.n = '0'; // force re-render
+            el.dataset.n = '0';
             refreshSpace();
         }));
         el.appendChild(card);
     });
+
+    startSpaceCountdown();
+}
+
+let spCountdownId = null;
+function startSpaceCountdown() {
+    if (spCountdownId) clearInterval(spCountdownId);
+    spCountdownId = setInterval(() => {
+        const els = document.querySelectorAll('.sp-countdown');
+        if (!els.length) { clearInterval(spCountdownId); spCountdownId = null; return; }
+        let anyExpired = false;
+        els.forEach(el => {
+            let rem = parseInt(el.dataset.remaining) - 1;
+            el.dataset.remaining = rem;
+            if (rem <= 0) { anyExpired = true; el.textContent = '0:00'; }
+            else el.textContent = fmtTimer(rem);
+        });
+        if (anyExpired) refreshSpace();
+    }, 1000);
 }
 
 function onAuthFail() {
     logout();
     show('auth-modal', true);
     showToast('Session expired, please login again');
+}
+
+/* ==================== Space WebSocket ==================== */
+function connectSpaceWS() {
+    if (spWs && spWs.readyState <= 1) return; // already connected or connecting
+    const token = getToken();
+    if (!token) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    spWs = new WebSocket(proto + '//' + location.host + '/ws/space?token=' + token);
+    spWs.onopen = () => {
+        stopSpacePoll(); // WebSocket connected, stop polling
+    };
+    spWs.onmessage = (e) => {
+        if (e.data === 'refresh') {
+            $('sp-items').dataset.n = '0';
+            refreshSpace();
+        } else if (e.data === 'empty') {
+            $('sp-items').dataset.n = '0';
+            $('sp-items').innerHTML = '<p class="muted" style="text-align:center;padding:24px">Your space is empty</p>';
+            disconnectSpaceWS();
+        }
+    };
+    spWs.onclose = () => {
+        spWs = null;
+        // Fallback to polling if still on Space tab
+        if (!$('view-space').classList.contains('hidden') && getToken()) {
+            if (!spPollId) spPollId = setInterval(refreshSpace, 10000);
+        }
+    };
+}
+
+function disconnectSpaceWS() {
+    if (spWs) { spWs.close(); spWs = null; }
 }

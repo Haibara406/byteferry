@@ -35,6 +35,9 @@ public class SpaceItem {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "expire_at")
+    private LocalDateTime expireAt;
+
     @OneToMany(mappedBy = "item", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Builder.Default
     private List<SpaceFile> files = new ArrayList<>();

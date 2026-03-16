@@ -39,7 +39,7 @@
 - [x] # Session expiry time (configurable, default 30 min)
 - [x] # Session auto-cleanup: close session deletes all files and Redis data
 - [x] # Session status indicator (active / expired)
-- [ ] Custom expiry time selection in UI
+- [x] # Custom expiry time selection in UI
 
 ---
 
@@ -53,7 +53,9 @@
 - [x] # Personal shared space: logged-in user has a dedicated page showing all their shared content
 - [x] # Multi-device sync: same account on multiple devices sees the same shared space
 - [x] # Shared space content management (delete, view history)
-- [ ] Clipboard sync across devices (WebSocket real-time push)
+- [x] # Space item expiration: each item has independent expiry time (10min/30min/1h/2h), auto-cleanup on expire
+- [x] # Space WebSocket real-time push: instant sync across devices, auto-disconnect when all items expire
+- [x] # Space Clear All: one-click delete all items
 
 ---
 
