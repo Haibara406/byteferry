@@ -202,19 +202,27 @@
                 <button class="modal-close" id="auth-close">&times;</button>
             </div>
             <form id="auth-login-form" class="modal-body" autocomplete="off">
-                <label class="label">Username</label>
-                <input class="input" type="text" id="login-user" required>
-                <label class="label" style="margin-top:12px">Password</label>
-                <input class="input" type="password" id="login-pass" required>
-                <button type="submit" class="btn btn-primary full" style="margin-top:16px">Login</button>
+                <div class="form-group">
+                    <label class="label">Username</label>
+                    <input class="input" type="text" id="login-user" placeholder="Enter username" required>
+                </div>
+                <div class="form-group">
+                    <label class="label">Password</label>
+                    <input class="input" type="password" id="login-pass" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="btn btn-primary full">Sign In</button>
                 <div id="login-error" class="error-card hidden mt"></div>
             </form>
             <form id="auth-reg-form" class="modal-body hidden" autocomplete="off">
-                <label class="label">Username</label>
-                <input class="input" type="text" id="reg-user" required>
-                <label class="label" style="margin-top:12px">Password</label>
-                <input class="input" type="password" id="reg-pass" required>
-                <button type="submit" class="btn btn-primary full" style="margin-top:16px">Register</button>
+                <div class="form-group">
+                    <label class="label">Username</label>
+                    <input class="input" type="text" id="reg-user" placeholder="3-50 characters" required>
+                </div>
+                <div class="form-group">
+                    <label class="label">Password</label>
+                    <input class="input" type="password" id="reg-pass" placeholder="At least 6 characters" required>
+                </div>
+                <button type="submit" class="btn btn-primary full">Create Account</button>
                 <div id="reg-error" class="error-card hidden mt"></div>
                 <div id="reg-ok" class="success-card hidden mt"></div>
             </form>
