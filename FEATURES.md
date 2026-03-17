@@ -63,16 +63,37 @@
 
 > Social features for logged-in users
 
-- [ ] Add friend (by username / friend code)
-- [ ] Friend list management (add / remove / block)
-- [ ] Friend request & accept flow
-- [ ] Open session with friend: create a bidirectional transfer channel
-- [ ] Bidirectional session: both sides can send text / image / file
-- [ ] In-session actions: copy text, preview image, download file
-- [ ] Session expiry: configurable timeout, auto-close when expired
-- [ ] Session close: auto-cleanup all transferred resources (files on disk + Redis data)
-- [ ] Session history (list of past sessions, no content retained after close)
-- [ ] Online status indicator for friends
+- [x] # Add friend (by username)
+- [x] # Friend list management (add / remove / block)
+- [x] # Friend request & accept flow
+- [x] # Open session with friend: create a bidirectional transfer channel
+- [x] # Bidirectional session: both sides can send text / image / file
+- [x] # In-session actions: copy text, preview image, download file
+- [x] # Session expiry: configurable timeout (10min/30min/1h/2h), auto-close when expired
+- [x] # Session close: auto-cleanup all transferred resources (files on disk + Redis data)
+- [x] # Session history (list of past sessions, no content retained after close)
+- [x] # Online status indicator for friends (WebSocket-based)
+
+---
+
+## Phase 4.5 - Multi-User Sessions & Invitation System
+
+> Upgrade friend sessions from 1-on-1 to multi-user with invitation flow
+
+- [x] # Multi-participant session data model (FriendSessionData with Participant list, admin role)
+- [x] # Invitation system: send/accept/decline session invitations
+- [x] # Invite to existing session (add more friends mid-session)
+- [x] # Pending invitations list with real-time WebSocket notifications
+- [x] # Session re-entry: leave session view without closing, re-enter from active sessions list
+- [x] # Active sessions list on Friends tab
+- [x] # Multi-user session management: kick member, leave session, admin-only close
+- [x] # Session members panel (view participants, admin badge, kick button)
+- [x] # Per-user message color coding (8 distinct colors for sender identification)
+- [x] # Single-device WebSocket enforcement (new connection replaces old)
+- [x] # Friend search/filter in friend list (client-side, with online-first sorting)
+- [x] # Multi-user session history (per-participant records with participant names)
+- [x] # Global invite permission toggle (admin controls whether members can invite)
+- [x] # Per-member invite permission toggle
 
 ---
 

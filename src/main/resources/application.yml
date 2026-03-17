@@ -28,6 +28,11 @@ spring:
       max-file-size: 100MB
       max-request-size: 100MB
 
+# Expose error messages in API responses
+server:
+  error:
+    include-message: always
+
 # ByteFerry custom config
 byteferry:
   storage:

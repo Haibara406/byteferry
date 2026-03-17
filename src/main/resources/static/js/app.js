@@ -3,6 +3,10 @@ let qType = 'text', qFiles = [];
 let sessCode = null, sessAttach = [], sessTimerId = null;
 let recvCode = null, recvPollId = null;
 let spAttach = [], spPollId = null, spWs = null;
+let friendWs = null, activeFSession = null, fSessionAttach = [], fSessionTimerId = null, fChatFriendId = null;
+let notifications = [];
+let closedSessions = new Set(); // Track closed sessions to prevent re-entry
+let currentMainTab = 'quick', currentSubTab = null;
 
 /* ==================== DOM Ready ==================== */
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,9 +18,14 @@ document.addEventListener('DOMContentLoaded', () => {
             show('view-quick', btn.dataset.mode === 'quick');
             show('view-session', btn.dataset.mode === 'session');
             show('view-space', btn.dataset.mode === 'space');
+            show('view-friend', btn.dataset.mode === 'friend');
             if (btn.dataset.mode !== 'session') stopRecvPoll();
             if (btn.dataset.mode === 'space') { refreshSpace(); connectSpaceWS(); }
             else { stopSpacePoll(); disconnectSpaceWS(); }
+            if (btn.dataset.mode === 'friend') { refreshFriendList(); refreshRequests(); }
+            currentMainTab = btn.dataset.mode;
+            currentSubTab = null;
+            saveHash();
         });
     });
 
@@ -101,8 +110,88 @@ document.addEventListener('DOMContentLoaded', () => {
     $('sp-img-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
     $('sp-send-btn').addEventListener('click', spaceAdd);
 
+    // Friends
+    // Friends — new 3-tab structure
+    bindTabs('friend-nav', { 'f-myfriends': 'f-myfriends', 'f-sessions': 'f-sessions', 'f-history': 'f-history' });
+    document.querySelectorAll('#friend-nav .pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            if (btn.dataset.tab === 'f-sessions') { renderCreateSessionFriends(); refreshPendingInvitations(); refreshActiveSessions(); }
+            if (btn.dataset.tab === 'f-history') refreshFriendSessionHistory();
+        });
+    });
+    $('f-add-btn').addEventListener('click', addFriend);
+    $('f-unified-input').addEventListener('keydown', e => { if (e.key === 'Enter') addFriend(); });
+    $('f-search-btn').addEventListener('click', renderFriendList);
+    // Pending requests toggle
+    $('f-pending-toggle').addEventListener('click', () => {
+        const content = $('f-pending-content');
+        const arrow = $('f-pending-arrow');
+        content.classList.toggle('hidden');
+        arrow.textContent = content.classList.contains('hidden') ? '\u25B6' : '\u25BC';
+    });
+    // Friend expire modal
+    document.querySelectorAll('#f-expire-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#f-expire-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    $('f-expire-close').addEventListener('click', () => show('f-expire-modal', false));
+    $('f-expire-confirm').addEventListener('click', confirmFriendSession);
+    // Friend session config modal (from My Friends Chat)
+    document.querySelectorAll('#f-config-expire-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#f-config-expire-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    $('f-config-search').addEventListener('input', renderConfigFriendsList);
+    $('f-config-confirm').addEventListener('click', confirmSessionConfig);
+    // Create session from Sessions tab
+    document.querySelectorAll('#f-create-expire-bar .type-chip').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#f-create-expire-bar .type-chip').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+    $('f-create-session-btn').addEventListener('click', createSessionFromTab);
+    $('f-create-search').addEventListener('input', renderCreateSessionFriends);
+    // Friend session
+    $('f-session-back').addEventListener('click', leaveFriendSessionView);
+    $('f-session-close-btn').addEventListener('click', closeFriendSession);
+    $('f-session-leave-btn').addEventListener('click', leaveCurrentSession);
+    $('f-session-members-toggle').addEventListener('click', () => {
+        $('f-session-members').classList.toggle('hidden');
+        if (!$('f-session-members').classList.contains('hidden')) refreshSessionMembers();
+    });
+    $('f-session-invite-btn').addEventListener('click', openSessionInviteModal);
+    $('f-session-invite-send').addEventListener('click', sendSessionInviteFromModal);
+    $('f-session-invite-cancel').addEventListener('click', () => show('f-session-invite-modal', false));
+    $('f-session-send-btn').addEventListener('click', sendFriendSessionItem);
+    $('f-admin-leave-transfer').addEventListener('click', adminLeaveTransfer);
+    $('f-admin-leave-dissolve').addEventListener('click', adminLeaveDissolve);
+    $('f-session-start-btn').addEventListener('click', activateCurrentSession);
+    $('f-session-attach-file').addEventListener('click', () => $('f-session-file-in').click());
+    $('f-session-attach-img').addEventListener('click', () => $('f-session-img-in').click());
+    $('f-session-file-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
+    $('f-session-img-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
+    // Enter key sends message (Shift+Enter for newline)
+    $('f-session-text').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFriendSessionItem(); }
+    });
+
+    // Notification drawer
+    $('notif-bell').addEventListener('click', () => {
+        $('notif-backdrop').classList.remove('hidden');
+        $('notif-drawer').classList.remove('hidden');
+        setTimeout(() => $('notif-drawer').classList.add('open'), 10);
+    });
+    $('notif-backdrop').addEventListener('click', closeNotifDrawer);
+    $('notif-clear').addEventListener('click', clearAllNotifications);
+
     // Restore session
     restoreAuth();
+    restoreFromHash();
 });
 
 /* ==================== Helpers ==================== */
@@ -113,10 +202,44 @@ function fmtSize(b) { if (!b) return '0 B'; const k = 1024, u = ['B','KB','MB','
 function fmtTime(iso) { if (!iso) return ''; const d = new Date(iso); return [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,'0')).join(':'); }
 function fmtTimer(sec) { return Math.floor(sec/60) + ':' + String(sec%60).padStart(2,'0'); }
 
-function showToast(msg) {
-    const t = $('toast'); t.textContent = msg;
+function saveHash() {
+    let hash = currentMainTab || 'quick';
+    if (currentSubTab) hash += '/' + currentSubTab;
+    location.hash = hash;
+}
+
+function restoreFromHash() {
+    const hash = location.hash.replace(/^#/, '');
+    if (!hash) return;
+    const parts = hash.split('/');
+    const mainTab = parts[0];
+    const subTab = parts[1] || null;
+    const validMain = ['quick', 'session', 'space', 'friend'];
+    if (!validMain.includes(mainTab)) return;
+    // For space/friend, only restore if logged in
+    if ((mainTab === 'space' || mainTab === 'friend') && !getToken()) return;
+    // Click the main tab pill
+    const mainPill = document.querySelector('#mode-nav .pill[data-mode="' + mainTab + '"]');
+    if (mainPill) mainPill.click();
+    // Click the sub-tab pill if specified
+    if (subTab) {
+        const navMap = { quick: 'quick-nav', session: 'sess-nav', friend: 'friend-nav' };
+        const navId = navMap[mainTab];
+        if (navId) {
+            const subPill = document.querySelector('#' + navId + ' .pill[data-tab="' + subTab + '"]');
+            if (subPill) subPill.click();
+        }
+    }
+}
+
+function showToast(msg, type = 'normal') {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.remove('error', 'success');
+    if (type === 'error') t.classList.add('error');
+    else if (type === 'success') t.classList.add('success');
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2200);
+    setTimeout(() => t.classList.remove('show'), 3000);
 }
 
 function copyText(text) { navigator.clipboard.writeText(text).then(() => showToast('Copied!')); }
@@ -133,6 +256,8 @@ function bindTabs(navId, map) {
             document.querySelectorAll('#' + navId + ' .pill').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             keys.forEach(k => show(map[k], btn.dataset.tab === k));
+            currentSubTab = btn.dataset.tab;
+            saveHash();
         });
     });
 }
@@ -212,7 +337,7 @@ async function quickSend() {
         const data = await resp.json();
         $('q-code').textContent = data.code;
         show('q-result', true);
-        showToast('Sent!');
+        showToast('Sent!', 'success');
     } catch(e) { showToast(e.message); }
     finally { btn.disabled = false; btn.textContent = 'Send'; }
 }
@@ -431,6 +556,13 @@ function onLogin(username) {
     show('user-info', true);
     $('user-display').textContent = username;
     show('nav-space', true);
+    show('nav-friend', true);
+    show('notif-bell', true);
+    connectFriendWS();
+    // Fetch userId for friend session sender identification
+    fetch('/api/auth/me', { headers: authHeader() }).then(r => r.ok ? r.json() : null).then(d => {
+        if (d && d.id) localStorage.setItem('bf_uid', d.id);
+    }).catch(() => {});
 }
 
 function logout() {
@@ -439,10 +571,15 @@ function logout() {
     show('user-area', true);
     show('user-info', false);
     show('nav-space', false);
+    show('nav-friend', false);
+    show('notif-bell', false);
     stopSpacePoll();
     disconnectSpaceWS();
-    // If on space tab, switch to quick
-    if (!$('view-space').classList.contains('hidden')) {
+    disconnectFriendWS();
+    notifications = [];
+    renderNotifications();
+    // If on space/friend tab, switch to quick
+    if (!$('view-space').classList.contains('hidden') || !$('view-friend').classList.contains('hidden')) {
         document.querySelector('#mode-nav .pill[data-mode="quick"]').click();
     }
     showToast('Logged out');
@@ -679,4 +816,961 @@ function connectSpaceWS() {
 
 function disconnectSpaceWS() {
     if (spWs) { spWs.close(); spWs = null; }
+}
+
+/* ==================== Friend WebSocket ==================== */
+function connectFriendWS() {
+    if (friendWs && friendWs.readyState <= 1) return;
+    const token = getToken();
+    if (!token) return;
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    friendWs = new WebSocket(proto + '//' + location.host + '/ws/friend?token=' + token);
+    friendWs.onmessage = (e) => {
+        try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'friend_request') {
+                showToast(msg.fromUsername + ' sent you a friend request');
+                addNotification(msg.fromUsername + ' sent you a friend request', 'friend_request', { requestId: msg.requestId });
+                refreshRequests();
+            }
+            else if (msg.type === 'friend_accepted') {
+                showToast(msg.username + ' accepted your request', 'success');
+                addNotification(msg.username + ' accepted your friend request', 'friend');
+                refreshFriendList(); refreshRequests();
+            }
+            else if (msg.type === 'friend_removed') { refreshFriendList(); }
+            else if (msg.type === 'session_invitation') {
+                showToast(msg.fromUsername + ' invited you to a session');
+                addNotification(msg.fromUsername + ' invited you to a session', 'session_invitation', { invitationId: msg.invitationId });
+                refreshPendingInvitations();
+            }
+            else if (msg.type === 'invitation_accepted') {
+                showToast(msg.username + ' accepted your invitation');
+                addNotification(msg.username + ' joined your session', 'session');
+                if (activeFSession === msg.sessionId) refreshFriendSessionItems();
+            }
+            else if (msg.type === 'invitation_declined') {
+                showToast(msg.byUsername + ' declined your invitation');
+                addNotification(msg.byUsername + ' declined your session invitation', 'session');
+            }
+            else if (msg.type === 'session_member_joined') {
+                if (activeFSession === msg.sessionId) {
+                    showToast(msg.username + ' joined the session');
+                    refreshFriendSessionItems();
+                }
+            }
+            else if (msg.type === 'session_member_left') {
+                if (activeFSession === msg.sessionId) {
+                    showToast(msg.username + ' left the session');
+                    refreshFriendSessionItems();
+                }
+            }
+            else if (msg.type === 'session_member_kicked') {
+                if (activeFSession === msg.sessionId) {
+                    showToast('You were kicked from the session by ' + msg.kickedBy);
+                    leaveFriendSessionView();
+                }
+            }
+            else if (msg.type === 'session_update') { if (activeFSession === msg.sessionId) refreshFriendSessionItems(); }
+            else if (msg.type === 'session_closed') {
+                // Mark session as closed
+                closedSessions.add(msg.sessionId);
+                if (activeFSession === msg.sessionId) {
+                    showToast('Session has been closed by admin');
+                    leaveFriendSessionView();
+                }
+            }
+            else if (msg.type === 'admin_transferred') {
+                showToast('You are now the admin (transferred by ' + msg.oldAdminUsername + ')');
+                addNotification(msg.oldAdminUsername + ' transferred admin role to you', 'session');
+                if (activeFSession === msg.sessionId) refreshFriendSessionItems();
+            }
+            else if (msg.type === 'online_status') { updateOnlineDot(msg.userId, msg.online); }
+            else if (msg.type === 'session_replaced') {
+                showToast('Connected from another device. This session is disconnected.');
+                if (activeFSession) leaveFriendSessionView();
+            }
+        } catch(err) {}
+    };
+    friendWs.onclose = () => { friendWs = null; };
+}
+
+function disconnectFriendWS() {
+    if (friendWs) { friendWs.close(); friendWs = null; }
+}
+
+function updateOnlineDot(userId, online) {
+    document.querySelectorAll('.online-dot[data-uid="' + userId + '"]').forEach(dot => {
+        dot.classList.toggle('online', online);
+    });
+}
+
+/* ==================== Friend Management ==================== */
+async function addFriend() {
+    const input = $('f-unified-input');
+    const username = input.value.trim();
+    if (!username) return;
+    try {
+        const r = await fetch('/api/friend/request', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify({ username }) });
+        if (r.status === 401) { onAuthFail(); return; }
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const errorMsg = d.message || d.error || 'Failed to send friend request';
+            showToast(errorMsg, 'error');
+            return;
+        }
+        input.value = '';
+        showToast('Friend request sent', 'success');
+        refreshRequests();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+let cachedFriends = [];
+
+async function refreshFriendList() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/friend/list', { headers: authHeader() });
+        if (r.status === 401) { onAuthFail(); return; }
+        if (!r.ok) return;
+        cachedFriends = await r.json();
+        renderFriendList();
+    } catch (e) {}
+}
+
+function renderFriendList() {
+    const el = $('f-friends-list');
+    const query = ($('f-unified-input') ? $('f-unified-input').value : '').toLowerCase().trim();
+    const filtered = query ? cachedFriends.filter(f => f.username.toLowerCase().includes(query)) : cachedFriends;
+    if (!filtered.length) {
+        if (query) {
+            el.innerHTML = '<div class="card" style="padding:20px;text-align:center;border:2px dashed var(--border)"><p style="color:var(--text);margin-bottom:8px">No friends found matching "<strong>' + esc(query) + '</strong>"</p><p class="muted" style="font-size:0.875rem">Try a different search term</p></div>';
+        } else {
+            el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No friends yet. Add one above!</p>';
+        }
+        return;
+    }
+    el.innerHTML = '';
+    // Sort: online first
+    filtered.sort((a, b) => (b.online ? 1 : 0) - (a.online ? 1 : 0));
+    filtered.forEach(f => {
+        const card = document.createElement('div'); card.className = 'friend-card';
+        card.innerHTML = `<div class="friend-info"><span class="online-dot ${f.online ? 'online' : ''}" data-uid="${f.friendId}"></span><span class="friend-name">${esc(f.username)}</span></div><div class="friend-actions"><button class="btn btn-primary btn-sm" data-chat="${f.friendId}" data-name="${esc(f.username)}">Chat</button><button class="btn-link danger sm" data-remove="${f.friendId}">Remove</button></div>`;
+        card.querySelector('[data-chat]').addEventListener('click', () => openFriendSession(f.friendId, f.username));
+        card.querySelector('[data-remove]').addEventListener('click', () => removeFriend(f.friendId));
+        el.appendChild(card);
+    });
+}
+
+async function refreshRequests() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/friend/requests', { headers: authHeader() });
+        if (r.status === 401) return;
+        if (!r.ok) return;
+        const data = await r.json();
+        // Received
+        const recvEl = $('f-req-received');
+        if (!data.received.length) { recvEl.innerHTML = '<p class="muted">None</p>'; }
+        else {
+            recvEl.innerHTML = '';
+            data.received.forEach(req => {
+                const card = document.createElement('div'); card.className = 'request-card';
+                card.innerHTML = `<span class="req-name">${esc(req.username)}</span><div class="req-actions"><button class="btn btn-primary btn-sm" data-accept="${req.id}">Accept</button><button class="btn-link danger sm" data-reject="${req.id}">Reject</button></div>`;
+                card.querySelector('[data-accept]').addEventListener('click', () => acceptRequest(req.id));
+                card.querySelector('[data-reject]').addEventListener('click', () => rejectRequest(req.id));
+                recvEl.appendChild(card);
+            });
+        }
+        // Sent
+        const sentEl = $('f-req-sent');
+        if (!data.sent.length) { sentEl.innerHTML = '<p class="muted">None</p>'; }
+        else {
+            sentEl.innerHTML = '';
+            data.sent.forEach(req => {
+                const card = document.createElement('div'); card.className = 'request-card';
+                card.innerHTML = `<span class="req-name">${esc(req.username)}</span><span class="muted">Pending</span>`;
+                sentEl.appendChild(card);
+            });
+        }
+        // Badge
+        const badge = $('f-req-badge');
+        if (data.received.length > 0) { badge.textContent = data.received.length; show('f-req-badge', true); }
+        else { show('f-req-badge', false); }
+    } catch (e) {}
+}
+
+async function acceptRequest(id) {
+    try {
+        const r = await fetch('/api/friend/request/' + id + '/accept', { method: 'POST', headers: authHeader() });
+        if (!r.ok) { showToast('Failed'); return; }
+        showToast('Accepted', 'success');
+        refreshRequests();
+        refreshFriendList();
+    } catch (e) { showToast(e.message); }
+}
+
+async function rejectRequest(id) {
+    try {
+        await fetch('/api/friend/request/' + id + '/reject', { method: 'POST', headers: authHeader() });
+        refreshRequests();
+    } catch (e) {}
+}
+
+async function removeFriend(friendId) {
+    try {
+        await fetch('/api/friend/' + friendId, { method: 'DELETE', headers: authHeader() });
+        showToast('Removed');
+        refreshFriendList();
+    } catch (e) {}
+}
+
+/* ==================== Friend Session ==================== */
+function openFriendSession(friendId, friendUsername) {
+    fChatFriendId = friendId;
+    $('f-session-friend-name').textContent = friendUsername;
+    renderConfigFriendsList();
+    show('f-session-config-modal', true);
+}
+
+function renderConfigFriendsList() {
+    const el = $('f-config-friends-list');
+    if (!el) return;
+    const query = ($('f-config-search') ? $('f-config-search').value : '').toLowerCase().trim();
+    // Filter out the primary friend being chatted with
+    const filtered = cachedFriends.filter(f => {
+        if (f.friendId === fChatFriendId) return false;
+        if (query && !f.username.toLowerCase().includes(query)) return false;
+        return true;
+    });
+    if (!filtered.length) {
+        el.innerHTML = query
+            ? '<p class="muted" style="padding:8px">No matching friends</p>'
+            : '<p class="muted" style="padding:8px">No other friends to invite</p>';
+        return;
+    }
+    el.innerHTML = '';
+    filtered.forEach(f => {
+        const label = document.createElement('label');
+        label.className = 'friend-check-card';
+        label.innerHTML = `<input type="checkbox" value="${f.friendId}" class="f-config-check"> <span class="online-dot ${f.online ? 'online' : ''}" data-uid="${f.friendId}"></span> <span>${esc(f.username)}</span>`;
+        el.appendChild(label);
+    });
+}
+
+async function confirmSessionConfig() {
+    show('f-session-config-modal', false);
+    const chip = document.querySelector('#f-config-expire-bar .type-chip.active');
+    const expire = chip ? parseInt(chip.dataset.expire) : 1800;
+    const sessionName = $('f-config-name').value.trim() || null;
+    const additionalFriends = Array.from(document.querySelectorAll('.f-config-check:checked')).map(cb => parseInt(cb.value));
+
+    try {
+        // Create session with primary friend
+        const r = await fetch('/api/friend/session/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ friendId: fChatFriendId, expireSeconds: expire, sessionName })
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed', 'error'); return; }
+        const data = await r.json();
+
+        // Invite additional friends if any
+        for (const friendId of additionalFriends) {
+            await fetch('/api/friend/session/invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...authHeader() },
+                body: JSON.stringify({ friendId, sessionId: data.sessionId })
+            });
+        }
+
+        showToast('Session created, invitations sent', 'success');
+        $('f-config-name').value = '';
+        $('f-config-search').value = '';
+        enterFriendSession(data.sessionId, null, expire);
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function confirmFriendSession() {
+    show('f-expire-modal', false);
+    const chip = document.querySelector('#f-expire-bar .type-chip.active');
+    const expire = chip ? parseInt(chip.dataset.expire) : 1800;
+    try {
+        const r = await fetch('/api/friend/session/invite', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify({ friendId: fChatFriendId, expireSeconds: expire }) });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed'); return; }
+        const data = await r.json();
+        showToast('Invitation sent, waiting for response...');
+        // Enter session immediately as admin (can send messages while waiting)
+        enterFriendSession(data.sessionId, null, expire);
+    } catch (e) { showToast(e.message); }
+}
+
+async function acceptSessionInvitation(invitationId) {
+    try {
+        const r = await fetch('/api/friend/session/invite/' + invitationId + '/accept', { method: 'POST', headers: authHeader() });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const msg = d.message || 'Failed';
+            showToast(msg, 'error');
+            // Mark notification as handled on failure too (session gone/expired)
+            markInvitationNotification(invitationId, 'accepted');
+            refreshPendingInvitations();
+            return;
+        }
+        const data = await r.json();
+        showToast('Invitation accepted');
+        // Mark notification as handled
+        markInvitationNotification(invitationId, 'accepted');
+        refreshPendingInvitations();
+        // Switch to Friends tab before entering session
+        switchToFriendsTab();
+        enterFriendSession(data.sessionId, null, data.remainingSeconds);
+    } catch (e) { showToast(e.message); }
+}
+
+async function declineSessionInvitation(invitationId) {
+    try {
+        const r = await fetch('/api/friend/session/invite/' + invitationId + '/decline', { method: 'POST', headers: authHeader() });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const msg = d.message || 'Failed';
+            showToast(msg, 'error');
+            // Mark notification as handled on failure too
+            markInvitationNotification(invitationId, 'declined');
+            refreshPendingInvitations();
+            return;
+        }
+        showToast('Invitation declined');
+        // Mark notification as handled
+        markInvitationNotification(invitationId, 'declined');
+        refreshPendingInvitations();
+    } catch (e) { showToast(e.message); }
+}
+
+function switchToFriendsTab() {
+    document.querySelectorAll('#mode-nav .pill').forEach(b => b.classList.remove('active'));
+    const friendPill = document.querySelector('#mode-nav .pill[data-mode="friend"]');
+    if (friendPill) friendPill.classList.add('active');
+    show('view-quick', false); show('view-session', false); show('view-space', false); show('view-friend', true);
+    stopRecvPoll(); stopSpacePoll(); disconnectSpaceWS();
+    currentMainTab = 'friend';
+    saveHash();
+}
+
+async function refreshPendingInvitations() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/friend/session/invitations', { headers: authHeader() });
+        if (!r.ok) return;
+        const invitations = await r.json();
+        const el = $('f-invitations');
+        if (!el) return;
+        // Update badge on Sessions tab
+        const badge = $('f-inv-badge');
+        if (badge) {
+            if (invitations.length > 0) { badge.textContent = invitations.length; show('f-inv-badge', true); }
+            else { show('f-inv-badge', false); }
+        }
+        if (!invitations.length) { el.innerHTML = ''; updateSessionsEmptyState(); return; }
+        el.innerHTML = '';
+        invitations.forEach(inv => {
+            const card = document.createElement('div'); card.className = 'invitation-card';
+            const durMin = Math.round(inv.expireSeconds / 60);
+            card.innerHTML = `<div class="inv-info"><strong>${esc(inv.fromUsername)}</strong> invited you to a session <span class="muted">(${durMin} min)</span></div><div class="inv-actions"><button class="btn btn-primary btn-sm" data-accept="${inv.invitationId}">Accept</button><button class="btn-link danger sm" data-decline="${inv.invitationId}">Decline</button></div>`;
+            card.querySelector('[data-accept]').addEventListener('click', () => acceptSessionInvitation(inv.invitationId));
+            card.querySelector('[data-decline]').addEventListener('click', () => declineSessionInvitation(inv.invitationId));
+            el.appendChild(card);
+        });
+        updateSessionsEmptyState();
+    } catch (e) {}
+}
+
+function enterFriendSession(sessionId, friendName, expireSec) {
+    activeFSession = sessionId;
+    if (friendName) $('f-session-friend-name').textContent = friendName;
+    else $('f-session-friend-name').textContent = 'Session';
+    $('f-session-status').textContent = 'ACTIVE';
+    $('f-session-status').className = 'badge green';
+    show('f-myfriends', false); show('f-sessions', false); show('f-history', false);
+    document.querySelector('#friend-nav').style.display = 'none';
+    show('f-session-members', false);
+    show('f-session-invite-modal', false);
+    $('f-session-close-btn').style.display = 'none';
+    show('f-session-overlay', true);
+    fSessionAttach = [];
+    $('f-session-items').innerHTML = '';
+    $('f-session-attachments').innerHTML = '';
+    show('f-session-attachments', false);
+    if (fSessionTimerId) clearInterval(fSessionTimerId);
+    fSessionTimerId = null;
+    // Timer will be set by refreshFriendSessionItems based on activatedAt
+    $('f-session-timer').textContent = 'Loading...';
+    show('f-session-start-btn', false);
+    refreshFriendSessionItems();
+}
+
+function leaveFriendSessionView() {
+    show('f-session-overlay', false);
+    document.querySelector('#friend-nav').style.display = '';
+    // Switch to Sessions tab (most natural after leaving a session)
+    document.querySelectorAll('#friend-nav .pill').forEach(b => b.classList.remove('active'));
+    const sessTab = document.querySelector('#friend-nav .pill[data-tab="f-sessions"]');
+    if (sessTab) sessTab.classList.add('active');
+    show('f-myfriends', false); show('f-sessions', true); show('f-history', false);
+    if (fSessionTimerId) { clearInterval(fSessionTimerId); fSessionTimerId = null; }
+    activeFSession = null;
+
+    // Clear the active sessions list immediately to prevent stale UI
+    const activeEl = $('f-active-sessions');
+    if (activeEl) activeEl.innerHTML = '<p class="muted" style="padding:12px;text-align:center">Refreshing...</p>';
+
+    // Delay refresh to ensure backend operations complete
+    setTimeout(() => {
+        refreshPendingInvitations();
+        refreshActiveSessions();
+        refreshFriendSessionHistory();
+    }, 500);
+}
+
+async function closeFriendSession() {
+    if (!activeFSession) return;
+    const sessionToClose = activeFSession;
+    try {
+        const r = await fetch('/api/friend/session/' + sessionToClose, { method: 'DELETE', headers: authHeader() });
+        if (!r.ok) {
+            const errorData = await r.json().catch(() => ({}));
+            throw new Error(errorData.message || `HTTP ${r.status}`);
+        }
+        showToast('Session closed', 'success');
+        // Mark this session as closed to prevent re-entry
+        closedSessions.add(sessionToClose);
+    } catch (e) {
+        console.error('Close session error:', e);
+        showToast('Failed to close session: ' + e.message, 'error');
+        return; // Don't leave view if close failed
+    }
+    leaveFriendSessionView();
+}
+
+async function leaveCurrentSession() {
+    if (!activeFSession) return;
+    const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+    // Check if current user is admin
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession, { headers: authHeader() });
+        if (!r.ok) { leaveFriendSessionView(); return; }
+        const data = await r.json();
+        const isAdmin = data.adminId === myId;
+        if (isAdmin && data.participants && data.participants.length > 1) {
+            // Show transfer/dissolve modal
+            showAdminLeaveModal(data.participants.filter(p => p.userId !== myId));
+            return;
+        }
+        // Non-admin or solo admin: just leave/close
+        await fetch('/api/friend/session/' + activeFSession + '/leave', { method: 'POST', headers: authHeader() });
+        showToast('Left session');
+        leaveFriendSessionView();
+    } catch (e) { showToast(e.message); }
+}
+
+function showAdminLeaveModal(otherParticipants) {
+    const modal = $('f-admin-leave-modal');
+    const list = $('f-admin-leave-list');
+    list.innerHTML = '';
+    otherParticipants.forEach(p => {
+        const opt = document.createElement('label');
+        opt.className = 'friend-check-card';
+        opt.innerHTML = `<input type="radio" name="transfer-target" value="${p.userId}"> <span>${esc(p.username)}</span>`;
+        list.appendChild(opt);
+    });
+    show('f-admin-leave-modal', true);
+}
+
+async function adminLeaveTransfer() {
+    const selected = document.querySelector('input[name="transfer-target"]:checked');
+    if (!selected) { showToast('Select a member to transfer admin'); return; }
+    const newAdminId = parseInt(selected.value);
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession + '/transfer', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ newAdminId })
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed'); return; }
+        showToast('Admin transferred, you left the session');
+        show('f-admin-leave-modal', false);
+        leaveFriendSessionView();
+    } catch (e) { showToast(e.message); }
+}
+
+async function adminLeaveDissolve() {
+    show('f-admin-leave-modal', false);
+    await closeFriendSession();
+}
+
+async function activateCurrentSession() {
+    if (!activeFSession) return;
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession + '/activate', { method: 'POST', headers: authHeader() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed'); return; }
+        showToast('Session started');
+        show('f-session-start-btn', false);
+        refreshFriendSessionItems();
+    } catch (e) { showToast(e.message); }
+}
+
+async function refreshSessionMembers() {
+    if (!activeFSession) return;
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession, { headers: authHeader() });
+        if (!r.ok) return;
+        const data = await r.json();
+        const el = $('f-session-members-list');
+        const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+        const isAdmin = data.adminId === myId;
+        el.innerHTML = '';
+        (data.participants || []).forEach(p => {
+            const row = document.createElement('div'); row.className = 'member-row';
+            const isMe = p.userId === myId;
+            let html = `<span class="member-name">${esc(p.username)}${p.userId === data.adminId ? ' <span class="badge blue-sm">Admin</span>' : ''}${isMe ? ' <span class="muted">(you)</span>' : ''}</span>`;
+            if (isAdmin && !isMe) {
+                html += `<button class="btn-link danger sm" data-kick="${p.userId}">Kick</button>`;
+            }
+            row.innerHTML = html;
+            const kickBtn = row.querySelector('[data-kick]');
+            if (kickBtn) kickBtn.addEventListener('click', () => kickSessionMember(p.userId));
+            el.appendChild(row);
+        });
+        // Show/hide close button (admin only)
+        $('f-session-close-btn').style.display = isAdmin ? '' : 'none';
+    } catch (e) {}
+}
+
+async function kickSessionMember(targetId) {
+    if (!activeFSession) return;
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession + '/kick/' + targetId, { method: 'POST', headers: authHeader() });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed'); return; }
+        showToast('Member kicked');
+        refreshSessionMembers();
+        refreshFriendSessionItems();
+    } catch (e) { showToast(e.message); }
+}
+
+async function openSessionInviteModal() {
+    if (!activeFSession) return;
+    try {
+        // Fetch current session data to get participant list
+        const r = await fetch('/api/friend/session/' + activeFSession, { headers: authHeader() });
+        if (!r.ok) return;
+        const sessionData = await r.json();
+        const participantIds = new Set((sessionData.participants || []).map(p => p.userId));
+
+        const list = $('f-session-invite-list');
+        list.innerHTML = '';
+
+        // Filter out friends who are already in the session
+        const availableFriends = cachedFriends.filter(f => !participantIds.has(f.friendId));
+
+        if (!availableFriends.length) {
+            list.innerHTML = '<p class="muted" style="padding:8px">All friends are already in this session</p>';
+        } else {
+            availableFriends.forEach(f => {
+                const label = document.createElement('label');
+                label.className = 'friend-check-card';
+                label.innerHTML = `<input type="checkbox" value="${f.friendId}" class="f-invite-check"> <span class="online-dot ${f.online ? 'online' : ''}" data-uid="${f.friendId}"></span> <span>${esc(f.username)}</span>`;
+                list.appendChild(label);
+            });
+        }
+        show('f-session-invite-modal', true);
+    } catch (e) {
+        showToast('Failed to load session data', 'error');
+    }
+}
+
+async function sendSessionInviteFromModal() {
+    const checked = document.querySelectorAll('.f-invite-check:checked');
+    if (!checked.length) { showToast('Select at least one friend'); return; }
+    const btn = $('f-session-invite-send'); btn.disabled = true;
+    try {
+        for (const cb of checked) {
+            const friendId = parseInt(cb.value);
+            const r = await fetch('/api/friend/session/invite', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+                body: JSON.stringify({ friendId, sessionId: activeFSession })
+            });
+            if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed to invite'); }
+        }
+        showToast('Invitations sent');
+        show('f-session-invite-modal', false);
+    } catch (e) { showToast(e.message); }
+    finally { btn.disabled = false; }
+}
+
+async function refreshActiveSessions() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/friend/session/active', { headers: authHeader() });
+        if (!r.ok) return;
+        const sessions = await r.json();
+        const el = $('f-active-sessions');
+        if (!el) return;
+
+        // Filter out closed sessions
+        const validSessions = sessions.filter(s => !closedSessions.has(s.sessionId));
+
+        if (!validSessions.length) { el.innerHTML = ''; updateSessionsEmptyState(); return; }
+        el.innerHTML = '';
+        const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+        validSessions.forEach(s => {
+            // Use sessionName if available, otherwise use participant names
+            let displayName;
+            if (s.sessionName) {
+                displayName = s.sessionName;
+            } else {
+                const otherNames = (s.participants || [])
+                    .filter(p => p.userId !== myId)
+                    .map(p => p.username).join(', ');
+                displayName = otherNames || 'Session';
+            }
+            const remainMin = Math.ceil(s.remainingSeconds / 60);
+            const card = document.createElement('div'); card.className = 'active-session-card';
+            card.innerHTML = `<div class="as-info"><strong>${esc(displayName)}</strong> <span class="muted">(${remainMin} min left)</span></div><div class="as-actions"><button class="btn btn-primary btn-sm" data-reenter="${s.sessionId}">Re-enter</button></div>`;
+            card.querySelector('[data-reenter]').addEventListener('click', () => {
+                enterFriendSession(s.sessionId, null, s.remainingSeconds);
+            });
+            el.appendChild(card);
+        });
+        updateSessionsEmptyState();
+    } catch (e) {}
+}
+
+function updateSessionsEmptyState() {
+    const empty = $('f-sessions-empty');
+    if (!empty) return;
+    const hasInv = $('f-invitations') && $('f-invitations').children.length > 0;
+    const hasSess = $('f-active-sessions') && $('f-active-sessions').children.length > 0;
+    empty.classList.toggle('hidden', hasInv || hasSess);
+}
+
+function renderCreateSessionFriends() {
+    const el = $('f-create-friends-list');
+    if (!el) return;
+    const query = ($('f-create-search') ? $('f-create-search').value : '').toLowerCase().trim();
+    const filtered = query ? cachedFriends.filter(f => f.username.toLowerCase().includes(query)) : cachedFriends;
+    if (!filtered.length) {
+        el.innerHTML = query
+            ? '<p class="muted" style="padding:8px">No matching friends</p>'
+            : '<p class="muted" style="padding:8px">No friends yet</p>';
+        return;
+    }
+    el.innerHTML = '';
+    filtered.forEach(f => {
+        const label = document.createElement('label');
+        label.className = 'friend-check-card';
+        label.innerHTML = `<input type="checkbox" value="${f.friendId}" class="f-create-check"> <span class="online-dot ${f.online ? 'online' : ''}" data-uid="${f.friendId}"></span> <span>${esc(f.username)}</span>`;
+        el.appendChild(label);
+    });
+}
+
+async function createSessionFromTab() {
+    const checked = document.querySelectorAll('.f-create-check:checked');
+    if (!checked.length) { showToast('Select at least one friend'); return; }
+    const chip = document.querySelector('#f-create-expire-bar .type-chip.active');
+    const expire = chip ? parseInt(chip.dataset.expire) : 1800;
+    const sessionName = $('f-create-name').value.trim() || null;
+    const friendIds = Array.from(checked).map(c => parseInt(c.value));
+    const btn = $('f-create-session-btn'); btn.disabled = true;
+    try {
+        // Send invitation to first friend (creates the session)
+        const r = await fetch('/api/friend/session/invite', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ friendId: friendIds[0], expireSeconds: expire, sessionName })
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); showToast(d.message || 'Failed'); return; }
+        const data = await r.json();
+        // Invite remaining friends to the same session
+        for (let i = 1; i < friendIds.length; i++) {
+            await fetch('/api/friend/session/invite', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+                body: JSON.stringify({ friendId: friendIds[i], sessionId: data.sessionId })
+            });
+        }
+        showToast('Session created, invitations sent', 'success');
+        $('f-create-name').value = '';
+        $('f-create-search').value = '';
+        enterFriendSession(data.sessionId, null, expire);
+    } catch (e) { showToast(e.message, 'error'); }
+    finally { btn.disabled = false; }
+}
+
+async function refreshFriendSessionItems() {
+    if (!activeFSession) return;
+    try {
+        const r = await fetch('/api/friend/session/' + activeFSession, { headers: authHeader() });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (data.status === 'CLOSED') {
+            $('f-session-status').textContent = 'CLOSED';
+            $('f-session-status').className = 'badge red';
+            showToast('Session has been closed');
+            return;
+        }
+        const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+        const isAdmin = data.adminId === myId;
+
+        // Use sessionName if available, otherwise fall back to participant names
+        if (data.sessionName) {
+            $('f-session-friend-name').textContent = data.sessionName;
+        } else {
+            const otherNames = (data.participants || [])
+                .filter(p => p.userId !== myId)
+                .map(p => p.username);
+            if (otherNames.length > 0) {
+                $('f-session-friend-name').textContent = otherNames.join(', ');
+            }
+        }
+
+        $('f-session-close-btn').style.display = isAdmin ? '' : 'none';
+
+        // Timer logic based on activatedAt
+        if (data.activatedAt) {
+            // Session is activated — run countdown
+            show('f-session-start-btn', false);
+            if (!fSessionTimerId) {
+                let rem = data.remainingSeconds;
+                $('f-session-timer').textContent = fmtTimer(Math.max(rem, 0));
+                fSessionTimerId = setInterval(() => {
+                    rem--;
+                    $('f-session-timer').textContent = fmtTimer(Math.max(rem, 0));
+                    if (rem <= 0) { clearInterval(fSessionTimerId); fSessionTimerId = null; showToast('Session expired'); leaveFriendSessionView(); }
+                }, 1000);
+            }
+        } else {
+            // Not activated yet
+            $('f-session-timer').textContent = 'Not started';
+            show('f-session-start-btn', isAdmin);
+        }
+
+        renderFriendSessionTimeline(data.items, data.sessionId);
+    } catch (e) {}
+}
+
+function renderFriendSessionTimeline(items, sessionId) {
+    const el = $('f-session-items');
+    const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+    if (!items || !items.length) { el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No messages yet</p>'; return; }
+    el.innerHTML = '';
+    // Build sender color map — current user always gets color-0 (blue)
+    const senderIds = [...new Set(items.map(i => i.senderId))];
+    const colorMap = {};
+    colorMap[myId] = 0; // current user = blue
+    let nextColor = 1;
+    senderIds.forEach(id => {
+        if (id !== myId) { colorMap[id] = nextColor % 8; nextColor++; }
+    });
+    items.forEach(item => {
+        const isMine = item.senderId === myId;
+        const colorIdx = colorMap[item.senderId] || 0;
+        const card = document.createElement('div');
+        card.className = 'timeline-card f-session-item ' + (isMine ? 'sent' : 'received');
+        card.style.borderLeftColor = 'var(--user-color-' + colorIdx + ')';
+        const typeClass = item.type === 'TEXT' ? 'text-type' : item.type === 'IMAGE' ? 'image-type' : 'file-type';
+        let html = `<div class="f-sender-label" style="color:var(--user-color-${colorIdx})">${esc(item.senderUsername)}</div>`;
+        html += `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><span class="time-label">${fmtTime(item.addedAt)}</span></div>`;
+        if (item.type === 'TEXT') {
+            html += `<pre class="text-bubble">${esc(item.content)}</pre><div style="margin-top:6px"><button class="btn-link" data-copy="${esc(item.content)}">Copy</button></div>`;
+        } else if (item.type === 'IMAGE') {
+            html += '<div class="img-grid">';
+            (item.files || []).forEach(f => {
+                html += `<div class="img-card"><img src="/api/friend/session/${sessionId}/items/${item.id}/preview/${f.index}?token=${getToken()}"><div class="img-footer"><span>${esc(f.fileName)}</span><button class="btn-link sm" data-url="/api/friend/session/${sessionId}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div></div>`;
+            });
+            html += '</div>';
+        } else {
+            (item.files || []).forEach(f => {
+                html += `<div class="dl-row"><div class="dl-info"><div class="dl-name">${esc(f.fileName)}</div><div class="dl-size">${fmtSize(f.fileSize)}</div></div><button class="btn btn-primary btn-sm" data-url="/api/friend/session/${sessionId}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div>`;
+            });
+        }
+        card.innerHTML = html;
+        card.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copy)));
+        card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = b.dataset.url + '?token=' + getToken();
+            a.download = b.dataset.name || '';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }));
+        el.appendChild(card);
+    });
+    // Auto-scroll to bottom
+    el.scrollTop = el.scrollHeight;
+}
+
+function renderFSessionAttach() {
+    const bar = $('f-session-attachments');
+    bar.innerHTML = '';
+    show('f-session-attachments', fSessionAttach.length > 0);
+    fSessionAttach.forEach((f, i) => {
+        const tag = document.createElement('span'); tag.className = 'attach-tag';
+        tag.innerHTML = `<span class="tag-name">${esc(f.name)}</span>`;
+        const btn = document.createElement('button'); btn.className = 'tag-remove'; btn.textContent = '\u00d7';
+        btn.addEventListener('click', () => { fSessionAttach.splice(i, 1); renderFSessionAttach(); });
+        tag.appendChild(btn); bar.appendChild(tag);
+    });
+}
+
+async function sendFriendSessionItem() {
+    const text = $('f-session-text').value.trim();
+    const hasFiles = fSessionAttach.length > 0;
+    if (!text && !hasFiles) { showToast('Enter text or attach files'); return; }
+    const btn = $('f-session-send-btn'); btn.disabled = true;
+    try {
+        if (text) {
+            const r = await fetch('/api/friend/session/' + activeFSession + '/items/text', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() }, body: JSON.stringify({ content: text }) });
+            if (r.status === 401) { onAuthFail(); return; }
+            if (!r.ok) throw new Error('Failed');
+            $('f-session-text').value = '';
+        }
+        if (hasFiles) {
+            const fd = new FormData();
+            fSessionAttach.forEach(f => fd.append('file', f));
+            const r = await fetch('/api/friend/session/' + activeFSession + '/items/file', { method: 'POST', headers: authHeader(), body: fd });
+            if (r.status === 401) { onAuthFail(); return; }
+            if (!r.ok) throw new Error('Failed');
+            fSessionAttach = []; renderFSessionAttach();
+        }
+        refreshFriendSessionItems();
+    } catch (e) { showToast(e.message); }
+    finally { btn.disabled = false; }
+}
+
+/* ==================== Friend Session History ==================== */
+async function refreshFriendSessionHistory() {
+    if (!getToken()) return;
+    try {
+        const r = await fetch('/api/friend/session/history', { headers: authHeader() });
+        if (!r.ok) return;
+        const list = await r.json();
+        const el = $('f-history-list');
+        if (!list.length) { el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No session history</p>'; return; }
+        el.innerHTML = '';
+        list.forEach(h => {
+            const card = document.createElement('div'); card.className = 'history-card';
+            card.innerHTML = `<div class="hist-name">${esc(h.participants)}</div><div class="hist-meta">${h.participantCount} members &middot; ${h.itemCount} items &middot; ${fmtTime(h.createdAt)} - ${fmtTime(h.closedAt)}</div>`;
+            el.appendChild(card);
+        });
+    } catch (e) {}
+}
+
+/* ==================== Notification Drawer ==================== */
+function addNotification(text, type = 'info', data = null) {
+    notifications.unshift({ id: Date.now(), text, type, time: new Date(), read: false, data });
+    if (notifications.length > 50) notifications = notifications.slice(0, 50);
+    renderNotifications();
+}
+
+function markInvitationNotification(invitationId, action) {
+    notifications.forEach(n => {
+        if (n.type === 'session_invitation' && n.data && n.data.invitationId === invitationId) {
+            n.data.handled = action; // 'accepted' or 'declined'
+            n.read = true;
+        }
+    });
+    renderNotifications();
+}
+
+function renderNotifications() {
+    const list = $('notif-list');
+    const badge = $('notif-badge');
+    const unreadCount = notifications.filter(n => !n.read).length;
+    if (unreadCount > 0) {
+        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+        show('notif-badge', true);
+    } else {
+        show('notif-badge', false);
+    }
+    if (!notifications.length) {
+        list.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No notifications</p>';
+        return;
+    }
+    list.innerHTML = '';
+    notifications.forEach(n => {
+        const item = document.createElement('div');
+        item.className = 'notif-item' + (n.read ? ' read' : '');
+        const elapsed = Math.floor((Date.now() - n.time.getTime()) / 1000);
+        const timeStr = elapsed < 60 ? 'Just now' : elapsed < 3600 ? Math.floor(elapsed / 60) + 'm ago' : Math.floor(elapsed / 3600) + 'h ago';
+
+        let actionsHtml = '';
+        if (n.type === 'session_invitation' && n.data && n.data.handled) {
+            actionsHtml = `<div class="notif-actions"><span class="muted">You have already ${esc(n.data.handled)} this invitation</span></div>`;
+        } else if (!n.read && n.data) {
+            if (n.type === 'friend_request' && n.data.requestId) {
+                actionsHtml = `<div class="notif-actions"><button class="btn btn-primary btn-sm" data-accept-friend="${n.data.requestId}">Accept</button><button class="btn-link sm" data-reject-friend="${n.data.requestId}">Reject</button></div>`;
+            } else if (n.type === 'session_invitation' && n.data.invitationId) {
+                actionsHtml = `<div class="notif-actions"><button class="btn btn-primary btn-sm" data-accept-inv="${n.data.invitationId}">Accept</button><button class="btn-link sm" data-decline-inv="${n.data.invitationId}">Decline</button></div>`;
+            }
+        }
+
+        item.innerHTML = `<div class="notif-dot"></div><div style="flex:1"><div class="notif-text">${esc(n.text)}</div><div class="notif-time">${timeStr}</div>${actionsHtml}</div>`;
+
+        // Mark as read on click (but not on button click)
+        item.addEventListener('click', (e) => {
+            if (!e.target.closest('button')) {
+                n.read = true;
+                renderNotifications();
+            }
+        });
+
+        // Bind action buttons
+        const acceptFriendBtn = item.querySelector('[data-accept-friend]');
+        if (acceptFriendBtn) {
+            acceptFriendBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await acceptRequest(parseInt(acceptFriendBtn.dataset.acceptFriend));
+                n.read = true;
+                renderNotifications();
+            });
+        }
+        const rejectFriendBtn = item.querySelector('[data-reject-friend]');
+        if (rejectFriendBtn) {
+            rejectFriendBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await rejectRequest(parseInt(rejectFriendBtn.dataset.rejectFriend));
+                n.read = true;
+                renderNotifications();
+            });
+        }
+        const acceptInvBtn = item.querySelector('[data-accept-inv]');
+        if (acceptInvBtn) {
+            acceptInvBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await acceptSessionInvitation(acceptInvBtn.dataset.acceptInv);
+                n.read = true;
+                renderNotifications();
+                closeNotifDrawer();
+            });
+        }
+        const declineInvBtn = item.querySelector('[data-decline-inv]');
+        if (declineInvBtn) {
+            declineInvBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await declineSessionInvitation(declineInvBtn.dataset.declineInv);
+                n.read = true;
+                renderNotifications();
+            });
+        }
+
+        list.appendChild(item);
+    });
+}
+
+function closeNotifDrawer() {
+    $('notif-drawer').classList.remove('open');
+    setTimeout(() => {
+        $('notif-backdrop').classList.add('hidden');
+        $('notif-drawer').classList.add('hidden');
+    }, 300);
+}
+
+function clearAllNotifications() {
+    notifications = [];
+    renderNotifications();
 }

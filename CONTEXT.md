@@ -60,30 +60,41 @@ ByteFerry/
 │   │   └── WebSocketConfig.java         # WebSocket 配置（注册 /ws/space 端点）
 │   ├── websocket/
 │   │   └── SpaceWebSocketHandler.java   # Space WebSocket 处理器（按 userId 推送）
+│   │   └── FriendWebSocketHandler.java  # Friend WebSocket 处理器（好友通知+在线状态）
 │   ├── controller/
 │   │   ├── ShareController.java         # Quick 模式 REST API
 │   │   ├── SessionController.java       # Session 模式 REST API
 │   │   ├── AuthController.java          # 注册/登录/用户信息 API
-│   │   └── SpaceController.java         # 个人空间 CRUD API
+│   │   ├── SpaceController.java         # 个人空间 CRUD API
+│   │   └── FriendController.java        # 好友管理 + 好友会话 API
 │   ├── model/
 │   │   ├── ShareData.java               # Quick 模式数据模型（含 FileInfo 内部类）
 │   │   ├── SessionData.java             # Session 模式数据模型（含 SessionItem 内部类）
+│   │   ├── FriendSessionData.java       # 好友会话数据模型（Redis，多人会话，含 Participant/FriendSessionItem）
+│   │   ├── SessionInvitation.java       # 会话邀请数据模型（Redis）
 │   │   └── entity/
 │   │       ├── User.java                # JPA 用户实体
 │   │       ├── SpaceItem.java           # JPA 空间内容实体
-│   │       └── SpaceFile.java           # JPA 空间文件实体
+│   │       ├── SpaceFile.java           # JPA 空间文件实体
+│   │       ├── Friendship.java          # JPA 好友关系实体
+│   │       └── FriendSessionHistory.java # JPA 好友会话历史实体（多参与者）
 │   ├── repository/
 │   │   ├── UserRepository.java
 │   │   ├── SpaceItemRepository.java
-│   │   └── SpaceFileRepository.java
+│   │   ├── SpaceFileRepository.java
+│   │   ├── FriendshipRepository.java
+│   │   └── FriendSessionHistoryRepository.java
 │   ├── service/
 │   │   ├── ShareService.java            # Quick 模式业务逻辑
 │   │   ├── SessionService.java          # Session 模式业务逻辑
 │   │   ├── FileStorageService.java      # 文件存储服务
 │   │   ├── AuthService.java             # 注册/登录/BCrypt
-│   │   └── SpaceService.java            # 个人空间 CRUD
+│   │   ├── SpaceService.java            # 个人空间 CRUD
+│   │   ├── FriendService.java           # 好友管理（请求/接受/删除/拉黑）
+│   │   └── FriendSessionService.java    # 好友会话（Redis CRUD + 历史）
 │   ├── task/
-│   │   └── SpaceCleanupTask.java        # Space 过期 item 定时清理（30s）
+│   │   ├── SpaceCleanupTask.java        # Space 过期 item 定时清理（30s）
+│   │   └── FriendSessionCleanupTask.java # 好友会话过期清理（30s）
 │   └── util/
 │       └── CodeGenerator.java           # 6 位分享码生成器（A-Z + 0-9）
 ├── src/main/resources/
@@ -214,6 +225,71 @@ ByteFerry/
 - 每条 item 支持 复制/预览/下载/删除，显示剩余时间倒计时
 - Token 存 localStorage，401 时自动弹出登录框
 
+### 4.5 好友系统 & 双向会话（Phase 4）
+
+**MySQL 表：** friendships, friend_session_history（JPA 自动建表）
+
+**好友 API（需 JWT）`/api/friend`：**
+
+| 端点 | 说明 |
+|------|------|
+| `POST /request` | 发送好友请求 `{username}` |
+| `POST /request/{id}/accept` | 接受请求 |
+| `POST /request/{id}/reject` | 拒绝请求 |
+| `GET /list` | 好友列表（含在线状态） |
+| `GET /requests` | 收到+发出的待处理请求 |
+| `DELETE /{friendId}` | 删除好友 |
+| `POST /{friendId}/block` | 拉黑 |
+
+**好友会话 API（需 JWT）`/api/friend/session`：**
+
+| 端点 | 说明 |
+|------|------|
+| `POST /invite` | 发送邀请 `{friendId, expireSeconds}` 或邀请到已有会话 `{friendId, sessionId}` |
+| `POST /invite/{invitationId}/accept` | 接受邀请（加入会话） |
+| `POST /invite/{invitationId}/decline` | 拒绝邀请 |
+| `GET /invitations` | 获取待处理邀请列表 |
+| `GET /{sessionId}` | 获取会话信息+items+participants |
+| `POST /{sessionId}/items/text` | 发送文本 |
+| `POST /{sessionId}/items/file` | 发送文件 |
+| `DELETE /{sessionId}` | 关闭会话（仅管理员，清理文件+写历史） |
+| `POST /{sessionId}/leave` | 离开会话（非管理员） |
+| `POST /{sessionId}/kick/{targetId}` | 踢出成员（仅管理员） |
+| `POST /{sessionId}/toggle-invite` | 切换全局邀请权限 `{enabled}` |
+| `POST /{sessionId}/toggle-member-invite` | 切换成员邀请权限 `{userId, enabled}` |
+| `GET /active` | 当前活跃会话列表 |
+| `GET /history` | 历史记录（含参与者名称） |
+
+**数据模型：**
+- Friendship（MySQL）：双向对称行，PENDING/ACCEPTED/BLOCKED
+- FriendSessionData（Redis）：`fsession:{uuid}`，多人会话模型
+  - adminId/adminUsername：会话管理员
+  - participants：List\<Participant\>（userId, username, joinedAt, inviteAllowed）
+  - globalInviteEnabled：是否允许成员邀请他人
+  - items：List\<FriendSessionItem\>，每条含 senderId/senderUsername
+  - status：WAITING_FOR_PEER → ACTIVE → CLOSED
+- SessionInvitation（Redis）：`finvite:{uuid}`，邀请数据（fromUserId, toUserId, sessionId, expireSeconds, status）
+- FriendSessionHistory（MySQL）：关闭后为每个参与者写入一条记录，含 participants 名称列表
+- Redis Set `fsession-user:{userId}` 索引活跃 sessionId
+
+**WebSocket `/ws/friend`：**
+- 登录后连接，JSON 消息格式
+- 单设备限制：新连接建立时关闭同用户旧连接（发送 session_replaced 通知）
+- 事件类型：friend_request, friend_accepted, friend_removed, session_invitation, invitation_accepted, invitation_declined, session_member_joined, session_member_left, session_member_kicked, session_update, session_closed, session_replaced, online_status
+- 在线状态：连接/断开时广播给好友
+
+**前端：**
+- Friends 作为第四个顶层 tab（仅登录后可见）
+- 三个子视图：Friends（好友列表+搜索+添加+活跃会话+待处理邀请）/ Requests（收发请求）/ History（会话历史）
+- 好友列表：搜索过滤、在线优先排序
+- 邀请流程：选择过期时间 → 发送邀请 → 等待对方接受 → 进入会话
+- 好友会话覆盖层：
+  - Header：成员面板切换、邀请好友、离开、关闭（仅管理员）
+  - 成员面板：参与者列表、Admin 标识、踢人按钮（仅管理员）
+  - 邀请模态框：从好友列表选择邀请
+  - 消息区：每个发送者分配不同颜色（8 色循环），发送者名称标签
+  - Composer：文本+附件输入
+
 ---
 
 ## 5. 关键设计决策与踩过的坑
@@ -229,6 +305,12 @@ ByteFerry/
 9. **Space 文件下载用 token query param** — 前端 JS 在下载 URL 后拼接 `?token=` 解决认证问题
 10. **Space WebSocket 按需连接** — 有存活 items 时才连接，空了发 `"empty"` 断开，断连回退到 10s 轮询
 11. **Space item 过期由前端倒计时 + 后端定时清理配合** — 前端倒计时到 0 立刻刷新（用户感知精确），后端 30s 定时清理磁盘文件和 DB 记录（后台无感）
+12. **多人会话用 Participant 列表替代双用户字段** — FriendSessionData 从 userIdA/userIdB 改为 List\<Participant\>，支持任意人数
+13. **邀请系统用 Redis 独立存储** — SessionInvitation 独立于 FriendSessionData，支持邀请到新会话或已有会话
+14. **会话 TTL 延迟启动** — 创建会话时不设 TTL（WAITING_FOR_PEER），第一个受邀者加入后才开始倒计时
+15. **单设备 WebSocket 限制** — 新连接建立时关闭同用户旧连接，发送 session_replaced 通知让前端退出会话视图
+16. **History 按参与者存储** — 关闭会话时为每个参与者写入一条记录，避免复杂的多对多查询
+17. **savePreserveTTL 模式** — 修改 Redis 中的会话数据时保持原有 TTL，避免意外延长或缩短过期时间
 
 ---
 
@@ -269,18 +351,9 @@ byteferry.jwt.expiration-hours: 72              # JWT 72 小时过期
 
 （无）
 
-### Phase 4 — 好友系统 & 双向会话
+### Phase 4 剩余
 
-- [ ] 添加好友（通过用户名/好友码）
-- [ ] 好友列表管理（添加/删除/拉黑）
-- [ ] 好友请求 & 接受流程
-- [ ] 与好友开启双向传输会话
-- [ ] 双向会话：双方都可以发送 text/image/file
-- [ ] 会话内操作：复制文本、预览图片、下载文件
-- [ ] 会话过期：可配置超时，到期自动关闭
-- [ ] 关闭会话：自动清理所有传输资源
-- [ ] 会话历史（列表，不保留内容）
-- [ ] 好友在线状态
+（无）
 
 ### Phase 5 — 体验增强
 
