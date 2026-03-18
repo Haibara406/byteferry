@@ -76,7 +76,7 @@ jobs:
           host: 154.94.235.178
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          debug: true
+          command_timeout: 15m
           script: |
             echo "=========================================="
             echo "🔄 开始部署 ByteFerry"
