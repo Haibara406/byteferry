@@ -49,8 +49,17 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
+      - name: Decide SSH auth method
+        id: decide
+        run: |
+          if [ -n "${{ secrets.SSH_PASSWORD }}" ]; then
+            echo "use_password=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "use_password=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check SSH_PRIVATE_KEY exists
-        if: ${{ secrets.SSH_PASSWORD == '' }}
+        if: ${{ steps.decide.outputs.use_password == 'false' }}
         run: |
           if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
             echo "SSH_PRIVATE_KEY is not set"
@@ -60,7 +69,7 @@ jobs:
           fi
 
       - name: Start ssh-agent and add private key
-        if: ${{ secrets.SSH_PASSWORD == '' }}
+        if: ${{ steps.decide.outputs.use_password == 'false' }}
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -71,7 +80,7 @@ jobs:
           ssh-keyscan -H ${{ env.SSH_HOST }} >> ~/.ssh/known_hosts
 
       - name: Remote deploy over SSH
-        if: ${{ secrets.SSH_PASSWORD == '' }}
+        if: ${{ steps.decide.outputs.use_password == 'false' }}
         env:
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
@@ -104,7 +113,7 @@ jobs:
           EOF
 
       - name: Remote deploy over SSH (password option)
-        if: ${{ secrets.SSH_PASSWORD != '' }}
+        if: ${{ steps.decide.outputs.use_password == 'true' }}
         uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ env.SSH_HOST }}
