@@ -81,6 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('s-attach-img-btn').addEventListener('click', () => $('s-img-in').click());
     $('s-file-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
     $('s-img-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
+    bindImagePaste('s-text', files => { sessAttach = sessAttach.concat(files); renderSessAttach(); });
 
     // Session join
     $('sr-join-btn').addEventListener('click', sessJoin);
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('sp-file-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
     $('sp-img-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
     $('sp-send-btn').addEventListener('click', spaceAdd);
+    bindImagePaste('sp-text', files => { spAttach = spAttach.concat(files); renderSpAttach(); });
 
     // Friends
     // Friends — new 3-tab structure
@@ -177,6 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('f-session-attach-img').addEventListener('click', () => $('f-session-img-in').click());
     $('f-session-file-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
     $('f-session-img-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
+    bindImagePaste('f-session-text', files => { fSessionAttach = fSessionAttach.concat(files); renderFSessionAttach(); });
     // Enter key sends message (Shift+Enter for newline)
     $('f-session-text').addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFriendSessionItem(); }
@@ -270,6 +273,22 @@ function setupDZ(zoneId, inputId, handler) {
     z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('drag-over'); });
     z.addEventListener('dragleave', () => z.classList.remove('drag-over'));
     z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('drag-over'); if (e.dataTransfer.files.length) handler(Array.from(e.dataTransfer.files)); });
+}
+
+function bindImagePaste(inputId, onImages) {
+    const input = $(inputId);
+    if (!input) return;
+    input.addEventListener('paste', e => {
+        const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+        const images = items
+            .filter(item => item.kind === 'file' && item.type && item.type.startsWith('image/'))
+            .map(item => item.getAsFile())
+            .filter(Boolean);
+        if (!images.length) return;
+        e.preventDefault();
+        onImages(images);
+        showToast('Image pasted', 'success');
+    });
 }
 
 function startTimer(elId, total, onExpire) {
@@ -536,6 +555,7 @@ function renderTimeline(items, code, containerId) {
         card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => dl(b.dataset.url, b.dataset.name)));
         el.appendChild(card);
     });
+    el.scrollTop = el.scrollHeight;
 }
 
 /* ==================== Auth ==================== */
@@ -762,6 +782,7 @@ function renderSpaceItems(items) {
     });
 
     startSpaceCountdown();
+    el.scrollTop = el.scrollHeight;
 }
 
 let spCountdownId = null;
@@ -1005,18 +1026,40 @@ async function refreshRequests() {
 async function acceptRequest(id) {
     try {
         const r = await fetch('/api/friend/request/' + id + '/accept', { method: 'POST', headers: authHeader() });
-        if (!r.ok) { showToast('Failed'); return; }
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const msg = d.message || 'Failed';
+            showToast(msg, 'error');
+            if (/not pending|not found/i.test(msg)) markFriendRequestNotification(id, 'accepted');
+            refreshRequests();
+            return false;
+        }
         showToast('Accepted', 'success');
+        markFriendRequestNotification(id, 'accepted');
         refreshRequests();
         refreshFriendList();
+        return true;
     } catch (e) { showToast(e.message); }
+    return false;
 }
 
 async function rejectRequest(id) {
     try {
-        await fetch('/api/friend/request/' + id + '/reject', { method: 'POST', headers: authHeader() });
+        const r = await fetch('/api/friend/request/' + id + '/reject', { method: 'POST', headers: authHeader() });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const msg = d.message || 'Failed';
+            showToast(msg, 'error');
+            if (/not found/i.test(msg)) markFriendRequestNotification(id, 'rejected');
+            refreshRequests();
+            return false;
+        }
+        showToast('Rejected', 'success');
+        markFriendRequestNotification(id, 'rejected');
         refreshRequests();
-    } catch (e) {}
+        return true;
+    } catch (e) { showToast(e.message); }
+    return false;
 }
 
 async function removeFriend(friendId) {
@@ -1752,6 +1795,16 @@ function markInvitationNotification(invitationId, action) {
     renderNotifications();
 }
 
+function markFriendRequestNotification(requestId, action) {
+    notifications.forEach(n => {
+        if (n.type === 'friend_request' && n.data && n.data.requestId === requestId) {
+            n.data.handled = action;
+            n.read = true;
+        }
+    });
+    renderNotifications();
+}
+
 function renderNotifications() {
     const list = $('notif-list');
     const badge = $('notif-badge');
@@ -1776,7 +1829,9 @@ function renderNotifications() {
         let actionsHtml = '';
         if (n.type === 'session_invitation' && n.data && n.data.handled) {
             actionsHtml = `<div class="notif-actions"><span class="muted">You have already ${esc(n.data.handled)} this invitation</span></div>`;
-        } else if (!n.read && n.data) {
+        } else if (n.type === 'friend_request' && n.data && n.data.handled) {
+            actionsHtml = `<div class="notif-actions"><span class="muted">You have already ${esc(n.data.handled)} this request</span></div>`;
+        } else if (n.data) {
             if (n.type === 'friend_request' && n.data.requestId) {
                 actionsHtml = `<div class="notif-actions"><button class="btn btn-primary btn-sm" data-accept-friend="${n.data.requestId}">Accept</button><button class="btn-link sm" data-reject-friend="${n.data.requestId}">Reject</button></div>`;
             } else if (n.type === 'session_invitation' && n.data.invitationId) {

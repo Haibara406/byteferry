@@ -146,7 +146,7 @@
                             <button class="btn btn-primary btn-sm" id="s-send-btn">Send</button>
                         </div>
                     </div>
-                    <div id="s-items" class="timeline"></div>
+                    <div id="s-items" class="timeline chat-scroll"></div>
                 </div>
             </section>
 
@@ -175,7 +175,7 @@
                         <p><strong>Session closed by sender.</strong></p>
                         <button class="btn-link" id="sr-closed-leave">Leave</button>
                     </div>
-                    <div id="sr-items" class="timeline"></div>
+                    <div id="sr-items" class="timeline chat-scroll"></div>
                 </div>
             </section>
         </div>
@@ -211,7 +211,7 @@
                 </div>
             </div>
             <!-- Items -->
-            <div id="sp-items" class="timeline" style="margin-top:16px"></div>
+            <div id="sp-items" class="timeline chat-scroll" style="margin-top:16px"></div>
         </div>
 
         <!-- ==================== FRIEND MODE ==================== -->
@@ -336,7 +336,7 @@
                         </div>
                     </div>
                 </div>
-                <div id="f-session-items" class="timeline f-session-items-scroll" style="margin-top:12px"></div>
+                <div id="f-session-items" class="timeline f-session-items-scroll f-live-session" style="margin-top:12px"></div>
                 <div class="composer" style="margin-top:12px">
                     <textarea id="f-session-text" class="composer-text" rows="3" placeholder="Type a message..."></textarea>
                     <div id="f-session-attachments" class="attach-bar hidden"></div>

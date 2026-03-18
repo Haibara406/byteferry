@@ -249,6 +249,11 @@ header {
 
 /* ==================== Timeline ==================== */
 .timeline { display: flex; flex-direction: column; gap: 12px; }
+.chat-scroll {
+    max-height: calc(100vh - 320px);
+    overflow-y: auto;
+    padding-right: 2px;
+}
 .timeline-card {
     background: var(--card); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 18px;
@@ -425,8 +430,17 @@ header {
     overflow-y: auto;
     scroll-behavior: smooth;
 }
-.f-session-item.sent { border-left: 3px solid var(--blue); }
-.f-session-item.received { border-left: 3px solid var(--green); }
+.f-live-session .f-session-item {
+    width: min(78%, 680px);
+}
+.f-live-session .f-session-item.sent {
+    align-self: flex-end;
+    border-left: 3px solid var(--blue);
+}
+.f-live-session .f-session-item.received {
+    align-self: flex-start;
+    border-left: 3px solid var(--green);
+}
 .f-sender-label {
     font-size: 0.75rem; font-weight: 600; color: var(--text3);
     margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em;

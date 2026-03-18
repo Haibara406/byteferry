@@ -63,7 +63,7 @@ public class FriendController {
         try {
             Friendship f = friendService.sendRequest(getUserId(auth), username.trim());
             User target = userRepository.findById(f.getFriendId()).orElse(null);
-            friendWsHandler.notifyFriendRequest(f.getFriendId(), getUserId(auth), getUsername(auth));
+            friendWsHandler.notifyFriendRequest(f.getFriendId(), f.getId(), getUserId(auth), getUsername(auth));
             Map<String, Object> result = new HashMap<>();
             result.put("id", f.getId());
             result.put("friendId", f.getFriendId());

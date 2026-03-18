@@ -73,8 +73,10 @@ public class FriendWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
-    public void notifyFriendRequest(Long targetUserId, Long fromUserId, String fromUsername) {
-        sendJson(targetUserId, "{\"type\":\"friend_request\",\"fromUserId\":" + fromUserId + ",\"fromUsername\":\"" + fromUsername + "\"}");
+    public void notifyFriendRequest(Long targetUserId, Long requestId, Long fromUserId, String fromUsername) {
+        sendJson(targetUserId, "{\"type\":\"friend_request\",\"requestId\":" + requestId
+                + ",\"fromUserId\":" + fromUserId
+                + ",\"fromUsername\":\"" + fromUsername + "\"}");
     }
 
     public void notifyFriendAccepted(Long targetUserId, Long byUserId, String byUsername) {
