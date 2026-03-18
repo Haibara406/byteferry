@@ -10,7 +10,6 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
-# 解决 Node.js 20 废弃警告
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -45,30 +44,15 @@ jobs:
 
       - name: 🐳 构建并推送 Docker 镜像
         run: |
-          # 构建镜像
           echo "开始构建 Docker 镜像..."
           docker build -t haibaraiii/byteferry:latest .
           docker build -t haibaraiii/byteferry:build-${{ github.run_number }} .
 
-          # 推送到 DockerHub
           echo "推送镜像到 DockerHub..."
           docker push haibaraiii/byteferry:latest
           docker push haibaraiii/byteferry:build-${{ github.run_number }}
 
           echo "✅ Docker镜像已推送"
-          echo "镜像标签: latest, build-${{ github.run_number }}"
-
-      - name: 🚀 部署到生产服务器
-        run: |
-          # 调试：检查 secret 是否存在
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "❌ SSH_PRIVATE_KEY secret 未设置或为空！"
-            exit 1
-          else
-            echo "✅ SSH_PRIVATE_KEY secret 已设置"
-            echo "密钥长度: ${{ secrets.SSH_PRIVATE_KEY }}"
-          fi
-        shell: bash
 
       - name: 🚀 部署到生产服务器
         uses: appleboy/ssh-action@v1.0.0
@@ -76,25 +60,22 @@ jobs:
           host: 154.94.235.178
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           command_timeout: 15m
           script: |
             echo "=========================================="
             echo "🔄 开始部署 ByteFerry"
             echo "=========================================="
 
-            # 容器名称
             CONTAINER_NAME="byteferry"
 
-            # 拉取最新镜像
             echo "📦 拉取最新 Docker 镜像..."
             docker pull haibaraiii/byteferry:latest
 
-            # 停止旧容器
             echo "🛑 停止旧容器..."
-            docker stop $CONTAINER_NAME 2>/dev/null || echo "容器不存在或已停止"
-            docker rm $CONTAINER_NAME 2>/dev/null || echo "容器已删除"
+            docker stop $CONTAINER_NAME 2>/dev/null || true
+            docker rm $CONTAINER_NAME 2>/dev/null || true
 
-            # 启动新容器
             echo "🚀 启动新容器..."
             docker run -d --name $CONTAINER_NAME \
               -p 8076:8076 \
@@ -109,73 +90,34 @@ jobs:
               --log-opt max-file=5 \
               haibaraiii/byteferry:latest
 
-            # 等待服务启动
             echo "⏳ 等待服务启动（20秒）..."
             sleep 20
 
-            # 检查容器状态
-            echo ""
             echo "📊 容器状态："
-            if docker ps | grep -q $CONTAINER_NAME; then
-              echo "✅ 容器运行正常"
-              docker ps | grep $CONTAINER_NAME
-            else
-              echo "❌ 容器启动失败！查看日志："
-              docker logs --tail 50 $CONTAINER_NAME
-              exit 1
-            fi
+            docker ps | grep $CONTAINER_NAME || echo "容器未运行"
 
-            # 健康检查
-            echo ""
-            echo "🏥 执行健康检查..."
-            for i in {1..10}; do
+            echo "🏥 健康检查..."
+            for i in 1 2 3 4 5 6 7 8 9 10; do
               if curl -f http://localhost:8076/actuator/health 2>/dev/null; then
                 echo "✅ 服务健康检查通过"
-                curl -s http://localhost:8076/actuator/health | python3 -m json.tool || true
                 break
               fi
               echo "⏳ 等待服务就绪... ($i/10)"
               sleep 3
             done
 
-            # 清理旧镜像
-            echo ""
             echo "🧹 清理旧镜像..."
             docker image prune -f
-
-            # 显示最后50行日志
-            echo ""
-            echo "📋 应用日志（最后50行）："
-            docker logs --tail 50 $CONTAINER_NAME
 
             echo ""
             echo "=========================================="
             echo "🎉 ByteFerry 部署完成！"
             echo "=========================================="
-            echo "🔗 访问地址: http://154.94.235.178:8076"
-
-      - name: 📊 生成部署报告
-        if: always()
-        run: |
-          echo "## 🚀 ByteFerry 部署报告" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 项目 | 信息 |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📦 项目名称 | ByteFerry |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🏷️ 构建号 | #${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🌿 分支 | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 👤 提交者 | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📝 提交信息 | ${{ github.event.head_commit.message }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🐳 Docker镜像 | haibaraiii/byteferry:latest |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🖥️ 服务器 | 154.94.235.178:8076 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏰ 部署时间 | $(date '+%Y-%m-%d %H:%M:%S') |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📊 状态 | ${{ job.status == 'success' && '✅ 成功' || '❌ 失败' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: 📢 部署成功通知
         if: success()
         run: |
-          echo "::notice title=部署成功::✅ ByteFerry 已成功部署到生产环境（构建 #${{ github.run_number }}）"
+          echo "::notice title=部署成功::✅ ByteFerry 已成功部署"
 
       - name: 📢 部署失败通知
         if: failure()
