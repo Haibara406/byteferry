@@ -16,8 +16,4 @@ EXPOSE 8076
 
 ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -Djava.security.egd=file:/./urandom"
 
-# 健康检查（如果项目包含actuator则启用，否则注释掉）
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
- CMD curl -f http://localhost:8076/actuator/health || exit 1
-
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
