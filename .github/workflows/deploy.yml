@@ -93,42 +93,18 @@ jobs:
           echo "Pulling image..."
           docker pull ${REGISTRY}/${IMAGE_NAME}:latest
 
-          if [ "$(docker ps -aq -f name=${CONTAINER_NAME})" ]; then
-            if [ "$(docker ps -q -f name=${CONTAINER_NAME})" ]; then
-              docker stop ${CONTAINER_NAME}
-            fi
-            docker rm ${CONTAINER_NAME}
-          fi
+          docker rm -f ${CONTAINER_NAME} >/dev/null 2>&1 || true
 
           mkdir -p ${VOLUME_DATA_DIR}
 
           docker run -d --name ${CONTAINER_NAME} \
-            -p ${APP_PORT}:${APP_PORT} \
+            -p ${APP_PORT}:8080 \
             -v ${VOLUME_DATA_DIR}:${VOLUME_DATA_DIR} \
             --restart unless-stopped \
             ${REGISTRY}/${IMAGE_NAME}:latest
 
           echo "Verifying container status..."
           docker ps --filter "name=${CONTAINER_NAME}"
-          EOF
-
-      - name: Remote health check (internal)
-        if: ${{ steps.decide.outputs.use_password == 'false' }}
-        run: |
-          ssh -o StrictHostKeyChecking=yes ${{ env.SSH_USER }}@${{ env.SSH_HOST }} << EOF
-          set -e
-          echo "Waiting for app to become ready..."
-          for i in $(seq 1 10); do
-            if curl -fsS http://127.0.0.1:${APP_PORT} >/dev/null 2>&1; then
-              echo "App is up"
-              exit 0
-            fi
-            echo "Not ready yet (\$i/10)"
-            sleep 3
-          done
-          echo "App not ready, printing last logs"
-          docker logs --tail 200 ${CONTAINER_NAME} || true
-          exit 1
           EOF
 
       - name: Remote deploy over SSH (password option)
@@ -142,41 +118,11 @@ jobs:
           script: |
             set -e
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            if [ "$(docker ps -aq -f name=${{ env.CONTAINER_NAME }})" ]; then
-              if [ "$(docker ps -q -f name=${{ env.CONTAINER_NAME }})" ]; then
-                docker stop ${{ env.CONTAINER_NAME }}
-              fi
-              docker rm ${{ env.CONTAINER_NAME }}
-            fi
+            docker rm -f ${{ env.CONTAINER_NAME }} >/dev/null 2>&1 || true
             mkdir -p ${{ env.VOLUME_DATA_DIR }}
             docker run -d --name ${{ env.CONTAINER_NAME }} \
-              -p ${{ env.APP_PORT }}:${{ env.APP_PORT }} \
+              -p ${{ env.APP_PORT }}:8080 \
               -v ${{ env.VOLUME_DATA_DIR }}:${{ env.VOLUME_DATA_DIR }} \
               --restart unless-stopped \
               ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             docker ps --filter "name=${{ env.CONTAINER_NAME }}"
-
-      - name: Remote health check (internal, password option)
-        if: ${{ steps.decide.outputs.use_password == 'true' }}
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ env.SSH_HOST }}
-          username: ${{ env.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script_stop: true
-          script: |
-            set -e
-            echo "Waiting for app to become ready..."
-            i=1
-            until [ $i -gt 10 ]; do
-              if curl -fsS http://127.0.0.1:${{ env.APP_PORT }} >/dev/null 2>&1; then
-                echo "App is up"
-                exit 0
-              fi
-              echo "Not ready yet ($i/10)"
-              i=$((i+1))
-              sleep 3
-            done
-            echo "App not ready, printing last logs"
-            docker logs --tail 200 ${{ env.CONTAINER_NAME }} || true
-            exit 1
