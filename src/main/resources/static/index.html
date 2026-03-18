@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ByteFerry - Cross-device transmission</title>
+    <link rel="icon" type="image/jpeg" href="/favicon.jpeg">
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
@@ -434,6 +435,10 @@
                 <button class="modal-close" id="auth-close">&times;</button>
             </div>
             <form id="auth-login-form" class="modal-body" autocomplete="off">
+                <div id="login-memory-wrap" class="hidden">
+                    <p class="label" style="margin-bottom:6px">Quick Login</p>
+                    <div id="login-memory-list" class="login-memory-list"></div>
+                </div>
                 <div class="form-group">
                     <label class="label">Username</label>
                     <input class="input" type="text" id="login-user" placeholder="Enter username" required>

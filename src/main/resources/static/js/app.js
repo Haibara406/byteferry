@@ -8,6 +8,7 @@ let notifications = [];
 let closedSessions = new Set(); // Track closed sessions to prevent re-entry
 let activeHistoryId = null;
 let currentMainTab = 'quick', currentSubTab = null;
+const LOGIN_MEMORY_KEY = 'bf_login_memory';
 
 /* ==================== DOM Ready ==================== */
 document.addEventListener('DOMContentLoaded', () => {
@@ -90,13 +91,22 @@ document.addEventListener('DOMContentLoaded', () => {
     $('sr-closed-leave').addEventListener('click', sessLeave);
 
     // Auth
-    $('login-btn').addEventListener('click', () => show('auth-modal', true));
+    $('login-btn').addEventListener('click', () => { show('auth-modal', true); renderLoginMemory(); });
     $('auth-close').addEventListener('click', () => show('auth-modal', false));
     $('auth-modal').addEventListener('click', e => { if (e.target === $('auth-modal')) show('auth-modal', false); });
     bindTabs('auth-nav', { 'auth-login-form': 'auth-login-form', 'auth-reg-form': 'auth-reg-form' });
     $('auth-login-form').addEventListener('submit', loginSubmit);
     $('auth-reg-form').addEventListener('submit', registerSubmit);
     $('logout-btn').addEventListener('click', logout);
+    const memoryList = $('login-memory-list');
+    if (memoryList) {
+        memoryList.addEventListener('click', e => {
+            const btn = e.target.closest('[data-memory-user]');
+            if (!btn) return;
+            quickLoginFromMemory(btn.dataset.memoryUser);
+        });
+    }
+    renderLoginMemory();
 
     // Space
     document.querySelectorAll('#sp-expire-bar .type-chip').forEach(btn => {
@@ -561,16 +571,73 @@ function renderTimeline(items, code, containerId) {
 /* ==================== Auth ==================== */
 function getToken() { return localStorage.getItem('bf_token'); }
 function getUser() { return localStorage.getItem('bf_user'); }
+function getLoginMemory() {
+    try {
+        const raw = localStorage.getItem(LOGIN_MEMORY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(it => it && typeof it.username === 'string' && typeof it.token === 'string');
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveLoginMemory(list) {
+    localStorage.setItem(LOGIN_MEMORY_KEY, JSON.stringify(list.slice(0, 8)));
+}
+
+function rememberLogin(username, token) {
+    if (!username || !token) return;
+    const list = getLoginMemory().filter(it => it.username !== username);
+    list.unshift({ username, token, updatedAt: Date.now() });
+    saveLoginMemory(list);
+}
+
+function removeRememberedLogin(username) {
+    const list = getLoginMemory().filter(it => it.username !== username);
+    saveLoginMemory(list);
+}
+
+function renderLoginMemory() {
+    const wrap = $('login-memory-wrap');
+    const listEl = $('login-memory-list');
+    if (!wrap || !listEl) return;
+    const list = getLoginMemory();
+    if (!list.length) {
+        show('login-memory-wrap', false);
+        listEl.innerHTML = '';
+        return;
+    }
+    show('login-memory-wrap', true);
+    listEl.innerHTML = '';
+    list.forEach(it => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'login-memory-btn';
+        btn.dataset.memoryUser = it.username;
+        btn.textContent = it.username;
+        listEl.appendChild(btn);
+    });
+}
 
 function authHeader() {
     const t = getToken();
     return t ? { 'Authorization': 'Bearer ' + t } : {};
 }
 
-function restoreAuth() {
+async function restoreAuth() {
     if (getToken() && getUser()) {
-        onLogin(getUser());
+        try {
+            const r = await fetch('/api/auth/me', { headers: authHeader() });
+            if (!r.ok) throw new Error('expired');
+            onLogin(getUser());
+        } catch (e) {
+            localStorage.removeItem('bf_token');
+            localStorage.removeItem('bf_user');
+            localStorage.removeItem('bf_uid');
+        }
     }
+    renderLoginMemory();
 }
 
 function onLogin(username) {
@@ -585,11 +652,14 @@ function onLogin(username) {
     fetch('/api/auth/me', { headers: authHeader() }).then(r => r.ok ? r.json() : null).then(d => {
         if (d && d.id) localStorage.setItem('bf_uid', d.id);
     }).catch(() => {});
+    rememberLogin(username, getToken());
+    renderLoginMemory();
 }
 
 function logout() {
     localStorage.removeItem('bf_token');
     localStorage.removeItem('bf_user');
+    localStorage.removeItem('bf_uid');
     show('user-area', true);
     show('user-info', false);
     show('nav-space', false);
@@ -607,6 +677,35 @@ function logout() {
     showToast('Logged out');
 }
 
+async function quickLoginFromMemory(username) {
+    const item = getLoginMemory().find(it => it.username === username);
+    if (!item) return;
+    show('login-error', false);
+    localStorage.setItem('bf_token', item.token);
+    localStorage.setItem('bf_user', item.username);
+    try {
+        const r = await fetch('/api/auth/me', { headers: authHeader() });
+        if (!r.ok) throw new Error('Session expired');
+        onLogin(item.username);
+        show('auth-modal', false);
+        showToast('Welcome back, ' + item.username, 'success');
+    } catch (e) {
+        localStorage.removeItem('bf_token');
+        localStorage.removeItem('bf_user');
+        localStorage.removeItem('bf_uid');
+        removeRememberedLogin(item.username);
+        renderLoginMemory();
+        const loginPill = document.querySelector('#auth-nav .pill[data-tab="auth-login-form"]');
+        if (loginPill) loginPill.click();
+        show('auth-modal', true);
+        $('login-user').value = item.username;
+        $('login-pass').value = '';
+        show('login-error', true);
+        $('login-error').innerHTML = '<p>Saved login expired, please enter password again.</p>';
+        showToast('Saved login expired, please sign in again', 'error');
+    }
+}
+
 async function loginSubmit(e) {
     e.preventDefault();
     show('login-error', false);
@@ -621,6 +720,7 @@ async function loginSubmit(e) {
         const d = await r.json();
         localStorage.setItem('bf_token', d.token);
         localStorage.setItem('bf_user', d.username);
+        rememberLogin(d.username, d.token);
         onLogin(d.username);
         show('auth-modal', false);
         showToast('Welcome, ' + d.username);

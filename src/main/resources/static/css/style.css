@@ -378,6 +378,27 @@ header {
 }
 .modal-close:hover { background: #f0f1f5; color: var(--text); }
 .modal-body { padding: 22px 24px 26px; }
+.login-memory-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+.login-memory-btn {
+    border: 1px solid var(--border);
+    background: #f8f9fd;
+    color: var(--text2);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 0.8125rem;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+.login-memory-btn:hover {
+    border-color: var(--blue);
+    color: var(--blue);
+    background: var(--blue-light);
+}
 .input {
     width: 100%; padding: 11px 14px;
     border: 1.5px solid var(--border); border-radius: var(--radius-sm);
