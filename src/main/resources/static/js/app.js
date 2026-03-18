@@ -81,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('s-attach-img-btn').addEventListener('click', () => $('s-img-in').click());
     $('s-file-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
     $('s-img-in').addEventListener('change', e => { sessAttach = sessAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSessAttach(); });
-    bindImagePaste('s-text', files => { sessAttach = sessAttach.concat(files); renderSessAttach(); });
+    bindClipboardFiles('s-text', files => { sessAttach = sessAttach.concat(files); renderSessAttach(); });
 
     // Session join
     $('sr-join-btn').addEventListener('click', sessJoin);
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('sp-file-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
     $('sp-img-in').addEventListener('change', e => { spAttach = spAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderSpAttach(); });
     $('sp-send-btn').addEventListener('click', spaceAdd);
-    bindImagePaste('sp-text', files => { spAttach = spAttach.concat(files); renderSpAttach(); });
+    bindClipboardFiles('sp-text', files => { spAttach = spAttach.concat(files); renderSpAttach(); });
 
     // Friends
     // Friends — new 3-tab structure
@@ -179,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('f-session-attach-img').addEventListener('click', () => $('f-session-img-in').click());
     $('f-session-file-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
     $('f-session-img-in').addEventListener('change', e => { fSessionAttach = fSessionAttach.concat(Array.from(e.target.files)); e.target.value = ''; renderFSessionAttach(); });
-    bindImagePaste('f-session-text', files => { fSessionAttach = fSessionAttach.concat(files); renderFSessionAttach(); });
+    bindClipboardFiles('f-session-text', files => { fSessionAttach = fSessionAttach.concat(files); renderFSessionAttach(); });
     // Enter key sends message (Shift+Enter for newline)
     $('f-session-text').addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFriendSessionItem(); }
@@ -275,19 +275,19 @@ function setupDZ(zoneId, inputId, handler) {
     z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('drag-over'); if (e.dataTransfer.files.length) handler(Array.from(e.dataTransfer.files)); });
 }
 
-function bindImagePaste(inputId, onImages) {
+function bindClipboardFiles(inputId, onFiles) {
     const input = $(inputId);
     if (!input) return;
     input.addEventListener('paste', e => {
         const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
-        const images = items
-            .filter(item => item.kind === 'file' && item.type && item.type.startsWith('image/'))
+        const files = items
+            .filter(item => item.kind === 'file')
             .map(item => item.getAsFile())
             .filter(Boolean);
-        if (!images.length) return;
+        if (!files.length) return;
         e.preventDefault();
-        onImages(images);
-        showToast('Image pasted', 'success');
+        onFiles(files);
+        showToast(files.length > 1 ? files.length + ' files pasted' : 'File pasted', 'success');
     });
 }
 
@@ -643,6 +643,12 @@ async function registerSubmit(e) {
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Registration failed');
         show('reg-ok', true);
         $('reg-ok').innerHTML = '<p>Registered! You can now login.</p>';
+        const loginPill = document.querySelector('#auth-nav .pill[data-tab="auth-login-form"]');
+        if (loginPill) loginPill.click();
+        $('login-user').value = user;
+        $('login-pass').value = '';
+        $('reg-user').value = '';
+        $('reg-pass').value = '';
     } catch (err) {
         show('reg-error', true);
         $('reg-error').innerHTML = '<p>' + esc(err.message) + '</p>';
