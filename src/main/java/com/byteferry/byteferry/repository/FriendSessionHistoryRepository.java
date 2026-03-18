@@ -8,4 +8,6 @@ import java.util.List;
 public interface FriendSessionHistoryRepository extends JpaRepository<FriendSessionHistory, Long> {
 
     List<FriendSessionHistory> findByUserIdOrderByClosedAtDesc(Long userId);
+
+    long countBySessionId(String sessionId);
 }

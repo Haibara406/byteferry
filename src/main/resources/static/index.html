@@ -287,6 +287,21 @@
                 <div id="f-history-list"></div>
             </section>
 
+            <!-- History Detail Overlay -->
+            <div id="f-history-overlay" class="hidden">
+                <div class="card row spread">
+                    <div class="row gap-sm">
+                        <button class="btn-link" id="f-history-back">&larr; Back</button>
+                        <strong id="f-history-title"></strong>
+                        <span class="badge" id="f-history-status">CLOSED</span>
+                    </div>
+                    <div class="row gap-sm">
+                        <span class="muted" id="f-history-meta"></span>
+                    </div>
+                </div>
+                <div id="f-history-items" class="timeline f-session-items-scroll" style="margin-top:12px"></div>
+            </div>
+
             <!-- Friend Session Overlay -->
             <div id="f-session-overlay" class="hidden">
                 <div class="card row spread">

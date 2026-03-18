@@ -7,6 +7,7 @@ import com.byteferry.byteferry.model.entity.FriendSessionHistory;
 import com.byteferry.byteferry.model.entity.User;
 import com.byteferry.byteferry.repository.FriendSessionHistoryRepository;
 import com.byteferry.byteferry.repository.UserRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -35,6 +36,7 @@ public class FriendSessionService {
     private final FriendService friendService;
     private final FriendSessionHistoryRepository historyRepository;
     private final UserRepository userRepository;
+    private final ObjectMapper objectMapper;
 
     // Temporary: keep old createSession for backward compatibility during migration
     // Will be replaced by invitation system in Step 3
@@ -178,14 +180,13 @@ public class FriendSessionService {
     public void closeSession(FriendSessionData s) {
         String sessionId = s.getSessionId();
 
-        // Delete files
-        if (s.getItems() != null) {
-            for (FriendSessionData.FriendSessionItem item : s.getItems()) {
-                if (item.getFiles() != null) {
-                    for (ShareData.FileInfo fi : item.getFiles()) {
-                        fileStorageService.delete(fi.getFilePath());
-                    }
-                }
+        // Serialize items to JSON for history (keep files on disk for historical access)
+        String itemsJson = null;
+        if (s.getItems() != null && !s.getItems().isEmpty()) {
+            try {
+                itemsJson = objectMapper.writeValueAsString(s.getItems());
+            } catch (Exception e) {
+                log.error("Failed to serialize items for session {}: {}", sessionId, e.getMessage());
             }
         }
 
@@ -212,11 +213,14 @@ public class FriendSessionService {
                             .expireSeconds(s.getExpireSeconds())
                             .createdAt(s.getCreatedAt())
                             .closedAt(LocalDateTime.now())
+                            .itemsJson(itemsJson)
                             .build());
                     log.info("Saved history for session {} user {}", sessionId, p.getUserId());
                 } catch (Exception e) {
                     log.error("Failed to save history for session {} user {}: {}", sessionId, p.getUserId(), e.getMessage(), e);
                 }
+                // Prune old history (keep only 10 most recent per user)
+                pruneHistory(p.getUserId());
             }
         }
 
@@ -275,6 +279,50 @@ public class FriendSessionService {
 
     public List<FriendSessionHistory> getHistory(Long userId) {
         return historyRepository.findByUserIdOrderByClosedAtDesc(userId);
+    }
+
+    public FriendSessionHistory getHistoryDetail(Long userId, Long historyId) {
+        FriendSessionHistory h = historyRepository.findById(historyId)
+                .orElseThrow(() -> new RuntimeException("History record not found"));
+        if (!h.getUserId().equals(userId)) {
+            throw new RuntimeException("Access denied");
+        }
+        return h;
+    }
+
+    private void pruneHistory(Long userId) {
+        List<FriendSessionHistory> all = historyRepository.findByUserIdOrderByClosedAtDesc(userId);
+        if (all.size() <= 10) return;
+
+        List<FriendSessionHistory> toDelete = new ArrayList<>(all.subList(10, all.size()));
+        for (FriendSessionHistory h : toDelete) {
+            String sid = h.getSessionId();
+            historyRepository.deleteById(h.getId());
+            // Only delete files when no other user still references this session
+            if (historyRepository.countBySessionId(sid) == 0) {
+                deleteHistoryFiles(h.getItemsJson());
+            }
+        }
+        log.info("Pruned {} old history records for user {}", toDelete.size(), userId);
+    }
+
+    private void deleteHistoryFiles(String itemsJson) {
+        if (itemsJson == null || itemsJson.isBlank()) return;
+        try {
+            List<FriendSessionData.FriendSessionItem> items = objectMapper.readValue(
+                    itemsJson,
+                    objectMapper.getTypeFactory().constructCollectionType(
+                            List.class, FriendSessionData.FriendSessionItem.class));
+            for (FriendSessionData.FriendSessionItem item : items) {
+                if (item.getFiles() != null) {
+                    for (ShareData.FileInfo fi : item.getFiles()) {
+                        fileStorageService.delete(fi.getFilePath());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse itemsJson for file cleanup: {}", e.getMessage());
+        }
     }
 
     // ==================== Activation ====================

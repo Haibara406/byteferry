@@ -48,6 +48,9 @@ public class FriendSessionHistory {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    @Column(name = "items_json", columnDefinition = "MEDIUMTEXT")
+    private String itemsJson;
+
     @PrePersist
     protected void onCreate() { closedAt = LocalDateTime.now(); }
 }

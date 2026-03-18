@@ -11,6 +11,7 @@ import com.byteferry.byteferry.service.FileStorageService;
 import com.byteferry.byteferry.service.FriendService;
 import com.byteferry.byteferry.service.FriendSessionService;
 import com.byteferry.byteferry.websocket.FriendWebSocketHandler;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
@@ -30,6 +31,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/friend")
@@ -41,6 +43,7 @@ public class FriendController {
     private final FriendWebSocketHandler friendWsHandler;
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
+    private final ObjectMapper objectMapper;
 
     private Long getUserId(Authentication auth) {
         if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
@@ -572,6 +575,7 @@ public class FriendController {
         List<Map<String, Object>> result = new ArrayList<>();
         for (FriendSessionHistory h : history) {
             Map<String, Object> m = new HashMap<>();
+            m.put("id", h.getId());
             m.put("sessionId", h.getSessionId());
             m.put("adminUsername", h.getAdminUsername());
             m.put("participants", h.getParticipants());
@@ -584,6 +588,71 @@ public class FriendController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/session/history/{historyId}")
+    public ResponseEntity<Map<String, Object>> getHistoryDetail(Authentication auth, @PathVariable Long historyId) {
+        Long userId = getUserId(auth);
+        FriendSessionHistory h = friendSessionService.getHistoryDetail(userId, historyId);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", h.getId());
+        result.put("sessionId", h.getSessionId());
+        result.put("adminUsername", h.getAdminUsername());
+        result.put("participants", h.getParticipants());
+        result.put("participantCount", h.getParticipantCount());
+        result.put("itemCount", h.getItemCount());
+        result.put("createdAt", h.getCreatedAt().toString());
+        result.put("closedAt", h.getClosedAt() != null ? h.getClosedAt().toString() : "");
+
+        List<Map<String, Object>> items = new ArrayList<>();
+        if (h.getItemsJson() != null && !h.getItemsJson().isBlank()) {
+            try {
+                List<FriendSessionData.FriendSessionItem> parsed = objectMapper.readValue(
+                        h.getItemsJson(),
+                        objectMapper.getTypeFactory().constructCollectionType(
+                                List.class, FriendSessionData.FriendSessionItem.class));
+                for (FriendSessionData.FriendSessionItem item : parsed) {
+                    Map<String, Object> im = new HashMap<>();
+                    im.put("id", item.getId());
+                    im.put("senderId", item.getSenderId());
+                    im.put("senderUsername", item.getSenderUsername());
+                    im.put("type", item.getType().name());
+                    im.put("content", item.getContent() != null ? item.getContent() : "");
+                    im.put("addedAt", item.getAddedAt().toString());
+                    List<Map<String, Object>> fileList = new ArrayList<>();
+                    if (item.getFiles() != null) {
+                        for (int i = 0; i < item.getFiles().size(); i++) {
+                            ShareData.FileInfo fi = item.getFiles().get(i);
+                            Map<String, Object> fm = new HashMap<>();
+                            fm.put("index", i);
+                            fm.put("fileName", fi.getFileName() != null ? fi.getFileName() : "");
+                            fm.put("fileSize", fi.getFileSize() != null ? fi.getFileSize() : 0);
+                            fm.put("mimeType", fi.getMimeType() != null ? fi.getMimeType() : "");
+                            fileList.add(fm);
+                        }
+                    }
+                    im.put("files", fileList);
+                    items.add(im);
+                }
+            } catch (Exception e) {
+                // Return empty items on parse failure
+            }
+        }
+        result.put("items", items);
+        return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/session/history/{historyId}/items/{itemId}/preview/{fileIndex}")
+    public ResponseEntity<Resource> historyPreview(Authentication auth, @PathVariable Long historyId,
+            @PathVariable int itemId, @PathVariable int fileIndex) throws IOException {
+        return serveHistoryFile(getUserId(auth), historyId, itemId, fileIndex, true);
+    }
+
+    @GetMapping("/session/history/{historyId}/items/{itemId}/download/{fileIndex}")
+    public ResponseEntity<Resource> historyDownload(Authentication auth, @PathVariable Long historyId,
+            @PathVariable int itemId, @PathVariable int fileIndex) throws IOException {
+        return serveHistoryFile(getUserId(auth), historyId, itemId, fileIndex, false);
+    }
+
     private ResponseEntity<Resource> serveFile(Long userId, String sessionId, int itemId, int fileIndex, boolean inline) throws IOException {
         FriendSessionData s = friendSessionService.getSession(sessionId);
         if (s == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
@@ -593,6 +662,41 @@ public class FriendController {
         if (!isParticipant) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
 
         FriendSessionData.FriendSessionItem item = s.getItems().stream()
+                .filter(i -> i.getId() == itemId).findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
+        if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file index");
+
+        ShareData.FileInfo fi = item.getFiles().get(fileIndex);
+        Path path = fileStorageService.load(fi.getFilePath());
+        if (!Files.exists(path)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
+
+        long size = Files.size(path);
+        InputStream in = Files.newInputStream(path);
+        String encodedName = URLEncoder.encode(fi.getFileName() != null ? fi.getFileName() : "download", StandardCharsets.UTF_8).replace("+", "%20");
+        MediaType mediaType = fi.getMimeType() != null ? MediaType.parseMediaType(fi.getMimeType()) : MediaType.APPLICATION_OCTET_STREAM;
+
+        return ResponseEntity.ok()
+                .contentType(mediaType).contentLength(size)
+                .header(HttpHeaders.CONTENT_DISPOSITION, (inline ? "inline" : "attachment") + "; filename*=UTF-8''" + encodedName)
+                .body(new InputStreamResource(in));
+    }
+
+    private ResponseEntity<Resource> serveHistoryFile(Long userId, Long historyId, int itemId, int fileIndex, boolean inline) throws IOException {
+        FriendSessionHistory h = friendSessionService.getHistoryDetail(userId, historyId);
+        if (h.getItemsJson() == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+
+        List<FriendSessionData.FriendSessionItem> items;
+        try {
+            items = objectMapper.readValue(
+                    h.getItemsJson(),
+                    objectMapper.getTypeFactory().constructCollectionType(
+                            List.class, FriendSessionData.FriendSessionItem.class));
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to parse history items");
+        }
+
+        FriendSessionData.FriendSessionItem item = items.stream()
                 .filter(i -> i.getId() == itemId).findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
         if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size())

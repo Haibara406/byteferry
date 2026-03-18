@@ -6,6 +6,7 @@ let spAttach = [], spPollId = null, spWs = null;
 let friendWs = null, activeFSession = null, fSessionAttach = [], fSessionTimerId = null, fChatFriendId = null;
 let notifications = [];
 let closedSessions = new Set(); // Track closed sessions to prevent re-entry
+let activeHistoryId = null;
 let currentMainTab = 'quick', currentSubTab = null;
 
 /* ==================== DOM Ready ==================== */
@@ -158,6 +159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('f-create-search').addEventListener('input', renderCreateSessionFriends);
     // Friend session
     $('f-session-back').addEventListener('click', leaveFriendSessionView);
+    $('f-history-back').addEventListener('click', leaveHistoryDetailView);
     $('f-session-close-btn').addEventListener('click', closeFriendSession);
     $('f-session-leave-btn').addEventListener('click', leaveCurrentSession);
     $('f-session-members-toggle').addEventListener('click', () => {
@@ -1653,11 +1655,84 @@ async function refreshFriendSessionHistory() {
         if (!list.length) { el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No session history</p>'; return; }
         el.innerHTML = '';
         list.forEach(h => {
-            const card = document.createElement('div'); card.className = 'history-card';
+            const card = document.createElement('div'); card.className = 'history-card clickable';
             card.innerHTML = `<div class="hist-name">${esc(h.participants)}</div><div class="hist-meta">${h.participantCount} members &middot; ${h.itemCount} items &middot; ${fmtTime(h.createdAt)} - ${fmtTime(h.closedAt)}</div>`;
+            card.addEventListener('click', () => openHistoryDetail(h.id, h.participants));
             el.appendChild(card);
         });
     } catch (e) {}
+}
+
+async function openHistoryDetail(historyId, title) {
+    activeHistoryId = historyId;
+    $('f-history-title').textContent = title || 'Session';
+    $('f-history-meta').textContent = '';
+    show('f-myfriends', false); show('f-sessions', false); show('f-history', false);
+    document.querySelector('#friend-nav').style.display = 'none';
+    show('f-history-overlay', true);
+    $('f-history-items').innerHTML = '<p class="muted" style="text-align:center;padding:24px">Loading...</p>';
+    try {
+        const r = await fetch('/api/friend/session/history/' + historyId, { headers: authHeader() });
+        if (r.status === 401) { onAuthFail(); return; }
+        if (!r.ok) throw new Error('Failed to load history');
+        const data = await r.json();
+        $('f-history-meta').textContent = data.participantCount + ' members \u00B7 ' + data.itemCount + ' items \u00B7 ' + fmtTime(data.createdAt) + ' - ' + fmtTime(data.closedAt);
+        renderHistoryTimeline(data.items, historyId);
+    } catch (e) {
+        $('f-history-items').innerHTML = '<p class="muted" style="text-align:center;padding:24px">Failed to load</p>';
+    }
+}
+
+function renderHistoryTimeline(items, historyId) {
+    const el = $('f-history-items');
+    const myId = parseInt(localStorage.getItem('bf_uid') || '0');
+    if (!items || !items.length) { el.innerHTML = '<p class="muted" style="text-align:center;padding:24px">No items in this session</p>'; return; }
+    el.innerHTML = '';
+    const senderIds = [...new Set(items.map(i => i.senderId))];
+    const colorMap = {}; colorMap[myId] = 0; let nextColor = 1;
+    senderIds.forEach(id => { if (id !== myId) { colorMap[id] = nextColor % 8; nextColor++; } });
+    items.forEach(item => {
+        const isMine = item.senderId === myId;
+        const colorIdx = colorMap[item.senderId] || 0;
+        const card = document.createElement('div');
+        card.className = 'timeline-card f-session-item ' + (isMine ? 'sent' : 'received');
+        card.style.borderLeftColor = 'var(--user-color-' + colorIdx + ')';
+        const typeClass = item.type === 'TEXT' ? 'text-type' : item.type === 'IMAGE' ? 'image-type' : 'file-type';
+        let html = `<div class="f-sender-label" style="color:var(--user-color-${colorIdx})">${esc(item.senderUsername)}</div>`;
+        html += `<div class="timeline-header"><span class="badge ${typeClass}">${item.type}</span><span class="time-label">${fmtTime(item.addedAt)}</span></div>`;
+        if (item.type === 'TEXT') {
+            html += `<pre class="text-bubble">${esc(item.content)}</pre><div style="margin-top:6px"><button class="btn-link" data-copy="${esc(item.content)}">Copy</button></div>`;
+        } else if (item.type === 'IMAGE') {
+            html += '<div class="img-grid">';
+            (item.files || []).forEach(f => {
+                html += `<div class="img-card"><img src="/api/friend/session/history/${historyId}/items/${item.id}/preview/${f.index}?token=${getToken()}"><div class="img-footer"><span>${esc(f.fileName)}</span><button class="btn-link sm" data-url="/api/friend/session/history/${historyId}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div></div>`;
+            });
+            html += '</div>';
+        } else {
+            (item.files || []).forEach(f => {
+                html += `<div class="dl-row"><div class="dl-info"><div class="dl-name">${esc(f.fileName)}</div><div class="dl-size">${fmtSize(f.fileSize)}</div></div><button class="btn btn-primary btn-sm" data-url="/api/friend/session/history/${historyId}/items/${item.id}/download/${f.index}" data-name="${esc(f.fileName)}">Download</button></div>`;
+            });
+        }
+        card.innerHTML = html;
+        card.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', () => copyText(b.dataset.copy)));
+        card.querySelectorAll('[data-url]').forEach(b => b.addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = b.dataset.url + '?token=' + getToken();
+            a.download = b.dataset.name || '';
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }));
+        el.appendChild(card);
+    });
+}
+
+function leaveHistoryDetailView() {
+    show('f-history-overlay', false);
+    document.querySelector('#friend-nav').style.display = '';
+    document.querySelectorAll('#friend-nav .pill').forEach(b => b.classList.remove('active'));
+    const histTab = document.querySelector('#friend-nav .pill[data-tab="f-history"]');
+    if (histTab) histTab.classList.add('active');
+    show('f-myfriends', false); show('f-sessions', false); show('f-history', true);
+    activeHistoryId = null;
 }
 
 /* ==================== Notification Drawer ==================== */
