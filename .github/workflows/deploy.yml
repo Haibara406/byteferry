@@ -76,8 +76,7 @@ jobs:
           host: 154.94.235.178
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          known_hosts: |
-            154.94.235.178 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDBChyCq0428T3zYOmXWLgWlZenZXKiClE5Mx9qramL9aCzxRNnY3Uv+1CViEfaE+oMW7nKnJIlTwmVmDebs5933TIk8mna2h5Sh+ujQL5UyxBN+LJbptzJx/FU1ap0tiEdDTFqpsWni5ddvm8ws3/My49FJubySb4eS1fQH+MgE9ohmwuugADKuHkcZhXU2yEhbfs4CMnmg2YVV12vnqXHSRDERP3rK+89y7CNcoGxuAFZNbTSR9nhpnHZH5SHIV6agvk3IUm/IxwumW3r55pbxuTwh7yjboRtYyCuxqh6pdL+pZqzU9/DlsbfkqKx7zdFM0tF7eldVEEd8zAo4QiV5Q76hhnhdHTQvH0BgQKznWoV8IkWSv+TH8qVOwo4qzWyCuTt5Z49Dbn2RcuvkbkBybrh9+aEC5FwuovMrCvxZv+/8lsxy0pnZqi0re30XeB6AzQ9eLBQWkLyotZOT95KovwsfYpY0MMPQpAS//AskAC5srnwW8YDBO3lEZs42eUNknkCS6DXdBVBMfKbSfTyBWrMeiMghzFRDggobY+h4SDsyozz2pNaXqJwc/kgHA6Vn915x0DWBNQhXrSoaC1F6CRwVNRGUxZW223GIJr7/dd96FGTAM5YCExSOgFsXFC+is7MJZunBEvZ6InIpEw4UZGBxyb8TP1hl+NDLzR0Bw==
+          fingerprint: SHA256:iJVlUDjvaB+prNKRxKAHfaKXiQP9LjtCcEHZoFwiRFY
           script: |
             echo "=========================================="
             echo "🔄 开始部署 ByteFerry"
