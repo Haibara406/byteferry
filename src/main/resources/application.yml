@@ -5,13 +5,15 @@ spring:
   # Redis
   data:
     redis:
-      host: localhost
+      host: 154.94.235.178
       port: 6379
       password: "Ww249260523.."
+      database: 2
+      timeout: 10000
 
   # MySQL
   datasource:
-    url: jdbc:mysql://localhost:3306/byteferry?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://154.94.235.178:3306/byteferry?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: "Ww249260523.."
   jpa:

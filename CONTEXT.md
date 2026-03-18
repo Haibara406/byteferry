@@ -252,13 +252,16 @@ ByteFerry/
 | `GET /{sessionId}` | 获取会话信息+items+participants |
 | `POST /{sessionId}/items/text` | 发送文本 |
 | `POST /{sessionId}/items/file` | 发送文件 |
-| `DELETE /{sessionId}` | 关闭会话（仅管理员，清理文件+写历史） |
+| `DELETE /{sessionId}` | 关闭会话（仅管理员，保留文件+写历史） |
 | `POST /{sessionId}/leave` | 离开会话（非管理员） |
 | `POST /{sessionId}/kick/{targetId}` | 踢出成员（仅管理员） |
 | `POST /{sessionId}/toggle-invite` | 切换全局邀请权限 `{enabled}` |
 | `POST /{sessionId}/toggle-member-invite` | 切换成员邀请权限 `{userId, enabled}` |
 | `GET /active` | 当前活跃会话列表 |
-| `GET /history` | 历史记录（含参与者名称） |
+| `GET /history` | 历史记录列表（含参与者名称、id） |
+| `GET /history/{historyId}` | 历史记录详情（含完整 items，可复制/下载） |
+| `GET /history/{historyId}/items/{itemId}/preview/{fileIndex}` | 历史文件预览 |
+| `GET /history/{historyId}/items/{itemId}/download/{fileIndex}` | 历史文件下载 |
 
 **数据模型：**
 - Friendship（MySQL）：双向对称行，PENDING/ACCEPTED/BLOCKED
@@ -269,7 +272,8 @@ ByteFerry/
   - items：List\<FriendSessionItem\>，每条含 senderId/senderUsername
   - status：WAITING_FOR_PEER → ACTIVE → CLOSED
 - SessionInvitation（Redis）：`finvite:{uuid}`，邀请数据（fromUserId, toUserId, sessionId, expireSeconds, status）
-- FriendSessionHistory（MySQL）：关闭后为每个参与者写入一条记录，含 participants 名称列表
+- FriendSessionHistory（MySQL）：关闭后为每个参与者写入一条记录，含 participants 名称列表、itemsJson（MEDIUMTEXT，序列化的会话内容）
+- 历史记录限制：每用户最多保留 10 条，超出自动清理最旧记录及无引用的文件
 - Redis Set `fsession-user:{userId}` 索引活跃 sessionId
 
 **WebSocket `/ws/friend`：**
@@ -280,7 +284,7 @@ ByteFerry/
 
 **前端：**
 - Friends 作为第四个顶层 tab（仅登录后可见）
-- 三个子视图：Friends（好友列表+搜索+添加+活跃会话+待处理邀请）/ Requests（收发请求）/ History（会话历史）
+- 三个子视图：Friends（好友列表+搜索+添加+活跃会话+待处理邀请）/ Requests（收发请求）/ History（会话历史，可点击查看内容）
 - 好友列表：搜索过滤、在线优先排序
 - 邀请流程：选择过期时间 → 发送邀请 → 等待对方接受 → 进入会话
 - 好友会话覆盖层：
@@ -289,6 +293,7 @@ ByteFerry/
   - 邀请模态框：从好友列表选择邀请
   - 消息区：每个发送者分配不同颜色（8 色循环），发送者名称标签
   - Composer：文本+附件输入
+- 历史详情覆盖层：点击历史卡片 → 查看完整会话内容（发送者颜色标识）→ 支持复制文本/预览图片/下载文件 → 返回列表
 
 ---
 
@@ -311,6 +316,8 @@ ByteFerry/
 15. **单设备 WebSocket 限制** — 新连接建立时关闭同用户旧连接，发送 session_replaced 通知让前端退出会话视图
 16. **History 按参与者存储** — 关闭会话时为每个参与者写入一条记录，避免复杂的多对多查询
 17. **savePreserveTTL 模式** — 修改 Redis 中的会话数据时保持原有 TTL，避免意外延长或缩短过期时间
+18. **History 内容保留用 JSON 列** — 会话关闭时将 items 序列化为 JSON 存入 `items_json` MEDIUMTEXT 列，文件保留在磁盘上；避免新增子表，items 为一次写入批量读取场景
+19. **History 文件多用户安全清理** — 同一会话的多个参与者共享相同文件，清理历史记录时通过 `countBySessionId` 检查是否还有其他用户引用该会话，仅在无引用时删除磁盘文件
 
 ---
 

@@ -72,6 +72,8 @@
 - [x] # Session expiry: configurable timeout (10min/30min/1h/2h), auto-close when expired
 - [x] # Session close: auto-cleanup all transferred resources (files on disk + Redis data)
 - [x] # Session history (list of past sessions, no content retained after close)
+- [x] # Session history content access: view last 10 sessions' content, copy text / preview image / download file from history
+- [x] # History auto-pruning: keep only 10 most recent sessions per user, permanently delete older records and orphaned files
 - [x] # Online status indicator for friends (WebSocket-based)
 
 ---
