@@ -36,7 +36,7 @@ ByteFerry 是一个 **跨设备剪切板共享 / 文件传输 Web 工具**。用
 
 ```bash
 mvn spring-boot:run
-# 访问 http://localhost:8080
+# 访问 http://localhost:8076
 ```
 
 **注意**：开发机上有 HTTP 代理 `http_proxy=127.0.0.1:7897`，测试 API 时需 `--noproxy '*'` 或将 localhost 加入代理排除。
