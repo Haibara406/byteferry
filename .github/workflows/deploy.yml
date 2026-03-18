@@ -59,6 +59,18 @@ jobs:
           echo "镜像标签: latest, build-${{ github.run_number }}"
 
       - name: 🚀 部署到生产服务器
+        run: |
+          # 调试：检查 secret 是否存在
+          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ SSH_PRIVATE_KEY secret 未设置或为空！"
+            exit 1
+          else
+            echo "✅ SSH_PRIVATE_KEY secret 已设置"
+            echo "密钥长度: ${{ secrets.SSH_PRIVATE_KEY }}"
+          fi
+        shell: bash
+
+      - name: 🚀 部署到生产服务器
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: 154.94.235.178
