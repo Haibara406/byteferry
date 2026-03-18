@@ -10,6 +10,10 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
+# 解决 Node.js 20 废弃警告
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-deploy:
     name: 🚀 构建并部署 ByteFerry
