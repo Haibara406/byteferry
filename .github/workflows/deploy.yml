@@ -76,7 +76,7 @@ jobs:
           host: 154.94.235.178
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          fingerprint: SHA256:iJVlUDjvaB+prNKRxKAHfaKXiQP9LjtCcEHZoFwiRFY
+          debug: true
           script: |
             echo "=========================================="
             echo "🔄 开始部署 ByteFerry"
