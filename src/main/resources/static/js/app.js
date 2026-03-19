@@ -607,11 +607,11 @@ function renderXhsResult(title, sourceUrl, images, videos) {
             html += '<div class="xhs-item">';
             html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" data-type="image" checked><span class="xhs-index">Image #${idx + 1}</span></label>`;
             html += `<a class="xhs-img-wrap" href="${esc(url)}" target="_blank" rel="noopener noreferrer">`;
-            html += `<img src="${esc(url)}" alt="xhs-${idx + 1}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`;
-            html += `<div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;background:#f5f5f5;color:#666;font-size:13px;text-align:center;padding:20px;flex-direction:column">`;
-            html += `<div style="margin-bottom:8px">📷</div>`;
-            html += `<div>The image format does not support preview for the time being</div>`;
-            html += `<div style="font-size:11px;color:#999;margin-top:4px">Click Download to save</div>`;
+            html += `<img src="${esc(url)}" alt="xhs-${idx + 1}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" style="width:100%;height:100%;object-fit:cover">`;
+            html += `<div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;background:linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);flex-direction:column;padding:30px;box-sizing:border-box">`;
+            html += `<div style="font-size:48px;margin-bottom:16px;opacity:0.6">📷</div>`;
+            html += `<div style="color:#5a6c7d;font-size:14px;font-weight:500;text-align:center;line-height:1.6">The image format does not support preview for the time being</div>`;
+            html += `<div style="color:#8b95a1;font-size:12px;margin-top:12px;padding:8px 16px;background:rgba(255,255,255,0.7);border-radius:4px">Click Download to save</div>`;
             html += `</div>`;
             html += `</a>`;
             html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-image-${idx + 1}.jpg" data-type="image">Download</button>`;
@@ -624,7 +624,18 @@ function renderXhsResult(title, sourceUrl, images, videos) {
         videos.forEach((url, idx) => {
             html += '<div class="xhs-item">';
             html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" data-type="video" checked><span class="xhs-index">Live Photo #${idx + 1}</span></label>`;
-            html += `<div class="xhs-img-wrap"><video src="${esc(url)}" controls style="width:100%;height:100%;object-fit:cover"></video></div>`;
+            html += `<div class="xhs-img-wrap" style="position:relative">`;
+            // 先尝试直接加载视频
+            html += `<video controls preload="metadata" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`;
+            html += `<source src="${esc(url)}" type="video/mp4">`;
+            html += `</video>`;
+            // 如果视频加载失败，显示占位符
+            html += `<div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;background:linear-gradient(135deg, #667eea 0%, #764ba2 100%);flex-direction:column;padding:30px;box-sizing:border-box;position:absolute;top:0;left:0">`;
+            html += `<div style="font-size:48px;margin-bottom:16px;opacity:0.9">🎬</div>`;
+            html += `<div style="color:#fff;font-size:14px;font-weight:500;text-align:center;line-height:1.6">Video preview unavailable</div>`;
+            html += `<div style="color:rgba(255,255,255,0.8);font-size:12px;margin-top:12px;padding:8px 16px;background:rgba(255,255,255,0.2);border-radius:4px">Click Download to save</div>`;
+            html += `</div>`;
+            html += `</div>`;
             html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-livephoto-${idx + 1}.mp4" data-type="video">Download</button>`;
             html += '</div>';
         });

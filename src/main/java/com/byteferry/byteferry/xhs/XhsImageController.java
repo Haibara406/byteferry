@@ -42,4 +42,15 @@ public class XhsImageController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment")
                 .body(content);
     }
+
+    @GetMapping("/proxy-video")
+    public ResponseEntity<byte[]> proxyVideo(@RequestParam String url) {
+        byte[] content = xhsImageExtractorService.downloadFile(url);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, "video/mp4")
+                .header(HttpHeaders.CACHE_CONTROL, "public, max-age=31536000")
+                .header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+                .body(content);
+    }
 }
