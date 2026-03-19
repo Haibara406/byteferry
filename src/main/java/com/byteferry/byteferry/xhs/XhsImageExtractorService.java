@@ -196,38 +196,18 @@ public class XhsImageExtractorService {
     private List<String> collectVideoUrls(String html) {
         Set<String> videoUrls = new LinkedHashSet<>();
 
-        // 方法 1：从 stream.h264 中提取 Live Photo 视频
-        // 匹配 "h264":[...] 数组中的 masterUrl 或 url
-        Pattern h264Pattern = Pattern.compile("\"h264\"\\s*:\\s*\\[([^\\]]+)\\]");
-        Matcher h264Matcher = h264Pattern.matcher(html);
+        // 直接在整个 HTML 中搜索所有 masterUrl 和 url
+        // 然后过滤出视频 URL（包含 sns-video 的）
+        Pattern urlPattern = Pattern.compile("\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
+        Matcher urlMatcher = urlPattern.matcher(html);
 
-        while (h264Matcher.find()) {
-            String h264Content = h264Matcher.group(1);
+        while (urlMatcher.find()) {
+            String url = urlMatcher.group(1);
+            url = normalizeEscapedUrl(url);
 
-            // 在 h264 数组内容中查找 masterUrl 或 url
-            Pattern urlPattern = Pattern.compile("\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
-            Matcher urlMatcher = urlPattern.matcher(h264Content);
-
-            while (urlMatcher.find()) {
-                String videoUrl = urlMatcher.group(1);
-                videoUrl = normalizeEscapedUrl(videoUrl);
-                if (videoUrl != null && videoUrl.startsWith("http")) {
-                    videoUrls.add(videoUrl);
-                }
-            }
-        }
-
-        // 方法 2：如果方法 1 没找到，尝试直接匹配 stream 相关的视频 URL
-        if (videoUrls.isEmpty()) {
-            Pattern streamPattern = Pattern.compile("\"stream\"[^}]*\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
-            Matcher streamMatcher = streamPattern.matcher(html);
-
-            while (streamMatcher.find()) {
-                String videoUrl = streamMatcher.group(1);
-                videoUrl = normalizeEscapedUrl(videoUrl);
-                if (videoUrl != null && videoUrl.startsWith("http") && videoUrl.contains("video")) {
-                    videoUrls.add(videoUrl);
-                }
+            // 只保留视频 URL（包含 sns-video 或 video 关键字）
+            if (url != null && url.startsWith("http") && url.contains("sns-video")) {
+                videoUrls.add(url);
             }
         }
 
