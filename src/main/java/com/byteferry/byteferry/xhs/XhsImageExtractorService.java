@@ -41,23 +41,60 @@ public class XhsImageExtractorService {
         return extractImagesViaHtml(sourceUrl);
     }
 
+    /**
+     * 下载文件（用于代理跨域下载）
+     */
+    public byte[] downloadFile(String url) {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(30))
+                .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15")
+                .header("Referer", "https://www.xiaohongshu.com/")
+                .GET()
+                .build();
+
+        try {
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() >= 400) {
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Failed to download file");
+            }
+            return response.body();
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Failed to download file");
+        }
+    }
+
     private Map<String, Object> extractImagesViaHtml(String sourceUrl) {
         FetchResult fetchResult = fetch(sourceUrl);
         String finalUrl = fetchResult.finalUrl();
         String html = fetchResult.html();
         String title = extractTitle(html);
-        List<String> images = collectImageUrls(html);
 
+        // 提取图片和视频
+        List<String> images = collectImageUrls(html);
+        List<String> videos = collectVideoUrls(html);
+
+        // 如果没有图片，说明可能是纯视频帖子
         if (images.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No downloadable image was recognized. Please confirm that it is a public link to a Xiaohongshu image and text post");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "No images found. This may be a video-only post, which is not currently supported.");
         }
 
-        return Map.of(
-                "sourceUrl", finalUrl,
-                "title", title == null || title.isBlank() ? "rednote post" : title,
-                "imageCount", images.size(),
-                "images", images
-        );
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sourceUrl", finalUrl);
+        result.put("title", title == null || title.isBlank() ? "rednote post" : title);
+        result.put("imageCount", images.size());
+        result.put("images", images);
+
+        // 只有当有视频时才添加视频字段（Live Photo）
+        if (!videos.isEmpty()) {
+            result.put("videoCount", videos.size());
+            result.put("videos", videos);
+        }
+
+        return result;
     }
 
     private String extractUrlFromInput(String rawInput) {
@@ -153,27 +190,71 @@ public class XhsImageExtractorService {
     }
 
     /**
+     * 从 HTML 中提取 Live Photo 的视频部分
+     * 注意：不提取纯视频帖子（有水印），只提取 Live Photo 的视频（无水印）
+     */
+    private List<String> collectVideoUrls(String html) {
+        Set<String> videoUrls = new LinkedHashSet<>();
+
+        // 方法 1：从 stream.h264 中提取 Live Photo 视频
+        // 匹配 "h264":[...] 数组中的 masterUrl 或 url
+        Pattern h264Pattern = Pattern.compile("\"h264\"\\s*:\\s*\\[([^\\]]+)\\]");
+        Matcher h264Matcher = h264Pattern.matcher(html);
+
+        while (h264Matcher.find()) {
+            String h264Content = h264Matcher.group(1);
+
+            // 在 h264 数组内容中查找 masterUrl 或 url
+            Pattern urlPattern = Pattern.compile("\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
+            Matcher urlMatcher = urlPattern.matcher(h264Content);
+
+            while (urlMatcher.find()) {
+                String videoUrl = urlMatcher.group(1);
+                videoUrl = normalizeEscapedUrl(videoUrl);
+                if (videoUrl != null && videoUrl.startsWith("http")) {
+                    videoUrls.add(videoUrl);
+                }
+            }
+        }
+
+        // 方法 2：如果方法 1 没找到，尝试直接匹配 stream 相关的视频 URL
+        if (videoUrls.isEmpty()) {
+            Pattern streamPattern = Pattern.compile("\"stream\"[^}]*\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
+            Matcher streamMatcher = streamPattern.matcher(html);
+
+            while (streamMatcher.find()) {
+                String videoUrl = streamMatcher.group(1);
+                videoUrl = normalizeEscapedUrl(videoUrl);
+                if (videoUrl != null && videoUrl.startsWith("http") && videoUrl.contains("video")) {
+                    videoUrls.add(videoUrl);
+                }
+            }
+        }
+
+        return new ArrayList<>(videoUrls);
+    }
+
+    /**
      * 从 HTML 中的 JSON 数据提取 traceId 并构造无水印 URL
+     * 包括普通图片和 Live Photo 的封面图片
      */
     private List<String> extractTraceIdUrls(String html) {
         List<String> urls = new ArrayList<>();
 
-        // 查找 imageList 数组
-        Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
-        Matcher matcher = imageListPattern.matcher(html);
+        // 直接在整个 HTML 中查找所有 traceId，不限制在 imageList 内
+        // 这样可以避免正则表达式匹配不完整的问题
+        Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
+        Matcher traceIdMatcher = traceIdPattern.matcher(html);
 
-        if (matcher.find()) {
-            String imageListJson = matcher.group(1);
+        Set<String> traceIds = new LinkedHashSet<>();
+        while (traceIdMatcher.find()) {
+            String traceId = traceIdMatcher.group(1);
+            traceIds.add(traceId);
+        }
 
-            // 提取所有 traceId
-            Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
-            Matcher traceIdMatcher = traceIdPattern.matcher(imageListJson);
-
-            while (traceIdMatcher.find()) {
-                String traceId = traceIdMatcher.group(1);
-                // 使用 ci.xiaohongshu.com 域名获取无水印图片
-                urls.add("https://ci.xiaohongshu.com/" + traceId);
-            }
+        // 为每个 traceId 构造 URL（不做格式转换，保持原始格式）
+        for (String traceId : traceIds) {
+            urls.add("https://ci.xiaohongshu.com/" + traceId);
         }
 
         return urls;

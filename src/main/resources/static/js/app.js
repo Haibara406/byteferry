@@ -8,6 +8,7 @@ let notifications = [];
 let closedSessions = new Set(); // Track closed sessions to prevent re-entry
 let activeHistoryId = null;
 let xhsImages = [];
+let xhsVideos = [];
 let currentMainTab = 'quick', currentSubTab = null;
 const LOGIN_MEMORY_KEY = 'bf_login_memory';
 
@@ -565,48 +566,84 @@ async function xhsExtractImages() {
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.message || 'Extraction failed');
+
+        // 支持图片和视频
         xhsImages = Array.isArray(data.images) ? data.images : [];
-        if (!xhsImages.length) throw new Error('No image extracted');
-        renderXhsResult(data.title || 'rednote post', data.sourceUrl || input, xhsImages);
+        xhsVideos = Array.isArray(data.videos) ? data.videos : [];
+
+        if (!xhsImages.length && !xhsVideos.length) {
+            throw new Error('No media extracted');
+        }
+
+        renderXhsResult(data.title || 'rednote post', data.sourceUrl || input, xhsImages, xhsVideos);
         show('xhs-actions', true);
         show('xhs-result', true);
-        showToast(xhsImages.length + ' images have been extracted', 'success');
+
+        // 动态生成提示信息
+        const parts = [];
+        if (xhsImages.length) parts.push(`${xhsImages.length} image${xhsImages.length > 1 ? 's' : ''}`);
+        if (xhsVideos.length) parts.push(`${xhsVideos.length} Live Photo${xhsVideos.length > 1 ? 's' : ''}`);
+        showToast(parts.join(' and ') + ' extracted', 'success');
     } catch (e) {
         show('xhs-error', true);
         $('xhs-error').innerHTML = `<p>${esc(e.message || 'Extraction failed')}</p>`;
     } finally {
         btn.disabled = false;
-        btn.textContent = 'Extract the picture';
+        btn.textContent = 'Extract';
     }
 }
 
-function renderXhsResult(title, sourceUrl, images) {
+function renderXhsResult(title, sourceUrl, images, videos) {
     const result = $('xhs-result');
     let html = '<div class="xhs-result-head">';
     html += `<p><strong>${esc(title)}</strong></p>`;
     html += `<p class="muted" style="margin-top:4px;word-break:break-all">${esc(sourceUrl)}</p>`;
     html += '</div>';
     html += '<div class="xhs-grid">';
-    images.forEach((url, idx) => {
-        html += '<div class="xhs-item">';
-        html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" checked><span class="xhs-index">Image #${idx + 1}</span></label>`;
-        html += `<a class="xhs-img-wrap" href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(url)}" alt="xhs-${idx + 1}"></a>`;
-        html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-${idx + 1}.jpg">Download</button>`;
-        html += '</div>';
-    });
+
+    // 渲染图片
+    if (images && images.length) {
+        images.forEach((url, idx) => {
+            html += '<div class="xhs-item">';
+            html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" data-type="image" checked><span class="xhs-index">Image #${idx + 1}</span></label>`;
+            html += `<a class="xhs-img-wrap" href="${esc(url)}" target="_blank" rel="noopener noreferrer">`;
+            html += `<img src="${esc(url)}" alt="xhs-${idx + 1}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`;
+            html += `<div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;background:#f5f5f5;color:#666;font-size:13px;text-align:center;padding:20px;flex-direction:column">`;
+            html += `<div style="margin-bottom:8px">📷</div>`;
+            html += `<div>The image format does not support preview for the time being</div>`;
+            html += `<div style="font-size:11px;color:#999;margin-top:4px">Click Download to save</div>`;
+            html += `</div>`;
+            html += `</a>`;
+            html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-image-${idx + 1}.jpg" data-type="image">Download</button>`;
+            html += '</div>';
+        });
+    }
+
+    // 渲染视频（Live Photo）
+    if (videos && videos.length) {
+        videos.forEach((url, idx) => {
+            html += '<div class="xhs-item">';
+            html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" data-type="video" checked><span class="xhs-index">Live Photo #${idx + 1}</span></label>`;
+            html += `<div class="xhs-img-wrap"><video src="${esc(url)}" controls style="width:100%;height:100%;object-fit:cover"></video></div>`;
+            html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-livephoto-${idx + 1}.mp4" data-type="video">Download</button>`;
+            html += '</div>';
+        });
+    }
+
     html += '</div>';
     result.innerHTML = html;
     result.querySelectorAll('[data-xhs-dl]').forEach(btn => {
-        btn.addEventListener('click', () => dl(btn.dataset.xhsDl, btn.dataset.name));
+        btn.addEventListener('click', () => xhsDownloadFile(btn.dataset.xhsDl, btn.dataset.name));
     });
 }
 
 function xhsCopyLinks() {
-    if (!xhsImages.length) {
+    const allUrls = [...xhsImages, ...(xhsVideos || [])];
+    if (!allUrls.length) {
         showToast('There are currently no replicable links', 'error');
         return;
     }
-    copyText(xhsImages.join('\n'));
+    copyText(allUrls.join('\n'));
 }
 
 function xhsSelectAll() {
@@ -617,14 +654,42 @@ function xhsSelectAll() {
 }
 
 function xhsDownloadSelected() {
-    const selected = Array.from(document.querySelectorAll('.xhs-item-check:checked')).map(c => c.dataset.url);
+    const selected = Array.from(document.querySelectorAll('.xhs-item-check:checked')).map(c => ({
+        url: c.dataset.url,
+        type: c.dataset.type
+    }));
     if (!selected.length) {
-        showToast('Please select the picture first', 'error');
+        showToast('Please select media first', 'error');
         return;
     }
-    selected.forEach((url, idx) => {
-        setTimeout(() => dl(url, 'xhs-' + (idx + 1) + '.jpg'), idx * 120);
+    selected.forEach((item, idx) => {
+        const ext = item.type === 'video' ? 'mp4' : 'jpg';
+        const name = `xhs-${item.type}-${idx + 1}.${ext}`;
+        setTimeout(() => xhsDownloadFile(item.url, name), idx * 200);
     });
+}
+
+// 通过后端代理下载文件（解决跨域问题）
+async function xhsDownloadFile(url, filename) {
+    try {
+        showToast('Downloading...', 'normal');
+        const resp = await fetch('/api/xhs/proxy-download?url=' + encodeURIComponent(url));
+        if (!resp.ok) throw new Error('Download failed');
+
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+
+        showToast('Downloaded: ' + filename, 'success');
+    } catch (e) {
+        showToast('Download failed: ' + e.message, 'error');
+    }
 }
 
 /* ==================== Timeline Renderer ==================== */

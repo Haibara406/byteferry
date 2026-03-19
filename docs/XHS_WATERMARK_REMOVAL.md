@@ -1,24 +1,34 @@
-# 小红书无水印图片提取实现文档
+# 小红书无水印图片/Live Photo 提取实现文档
 
 ## 背景
 
-小红书（RedNote/XHS）的图片分享链接默认会返回带水印的图片。本文档记录了如何通过分析小红书的页面结构和 CDN 机制，实现无水印图片的提取。
+小红书（RedNote/XHS）的图片分享链接默认会返回带水印的图片。本文档记录了如何通过分析小红书的页面结构和 CDN 机制，实现无水印图片和 Live Photo（实况图片）的提取。
+
+**注意**：纯视频帖子的视频带有水印，目前不支持提取。本方案只支持：
+- 普通静态图片（无水印）
+- Live Photo（实况图片）的封面和视频（无水印）
 
 ## 问题分析
 
 ### 初始问题
 - 直接从 HTML 的 `<img src>` 标签提取的图片 URL 包含水印参数
 - 例如：`http://sns-webpic-qc.xhscdn.com/.../token!h5_1080jpg` 中的 `!h5_1080jpg` 会添加水印
+- 纯视频帖子的视频带有水印，无法获取无水印版本
 
 ### 关键发现
 通过分析开源项目 [XHS_Downloader_Android](https://github.com/neoruaa/XHS_Downloader_Android)，发现了两个关键突破点：
 
 1. **JSON 数据中的 traceId**：小红书页面 HTML 中嵌入了 JSON 数据，包含 `imageList` 数组，每个图片对象都有 `traceId` 字段
 2. **CDN 域名转换**：使用 `ci.xiaohongshu.com` 域名可以获取无水印原图
+3. **Live Photo 提取**：从 `image.stream.h264` 字段提取 Live Photo 的视频部分（无水印）
+
+**重要限制**：纯视频帖子的视频带有水印，无法通过简单的 URL 转换去除，因此不支持纯视频帖子的提取。
 
 ## 技术实现
 
-### 方案一：提取 traceId（推荐）
+### 图片提取
+
+#### 方案一：提取 traceId（推荐）
 
 #### 原理
 小红书页面的 HTML 中包含类似这样的 JSON 结构：
@@ -68,7 +78,7 @@ private List<String> extractTraceIdUrls(String html) {
 - 不需要复杂的 URL 解析
 - 获取的是原始图片标识符
 
-### 方案二：URL 转换（备用）
+#### 方案二：URL 转换（备用）
 
 #### 原理
 将带水印的 CDN URL 转换为无水印版本：
@@ -123,7 +133,129 @@ private String transformXhsCdnUrl(String originalUrl) {
 3. 去除 `!` 或 `?` 后的参数（如 `!nd_dft_wlteh_webp_3`、`!h5_1080jpg`）
 4. 拼接到 `https://ci.xiaohongshu.com/` 后面
 
-### 综合策略
+### 视频提取
+
+#### Live Photo 视频提取（无水印）
+
+##### 原理
+Live Photo（实况图片）在 `imageList` 中，每个 Live Photo 对象包含：
+- `traceId`：封面图片的标识符
+- `stream.h264[0].masterUrl` 或 `url`：短视频的 URL（无水印）
+
+**重要**：
+- Live Photo 的封面图片和视频**都应该**被提取
+- Live Photo 的视频是**无水印**的
+- 纯视频帖子的视频**有水印**，不支持提取
+
+**JSON 结构：**
+```json
+{
+  "imageList": [
+    {
+      "traceId": "1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnqk",
+      "stream": {
+        "h264": [
+          {
+            "masterUrl": "https://sns-video-bd.xhscdn.com/...",
+            "url": "https://sns-video-bd.xhscdn.com/..."
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+##### 实现代码
+
+```java
+private List<String> collectVideoUrls(String html) {
+    Set<String> videoUrls = new LinkedHashSet<>();
+
+    // 只从 imageList 中提取 Live Photo 的视频部分
+    Pattern livePhotoPattern = Pattern.compile(
+        "\"stream\"\\s*:\\s*\\{[^}]*\"h264\"\\s*:\\s*\\[[^\\]]*\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"",
+        Pattern.DOTALL
+    );
+    Matcher livePhotoMatcher = livePhotoPattern.matcher(html);
+
+    while (livePhotoMatcher.find()) {
+        String videoUrl = livePhotoMatcher.group(1);
+        videoUrl = normalizeEscapedUrl(videoUrl);
+        if (videoUrl != null && videoUrl.startsWith("http")) {
+            videoUrls.add(videoUrl);
+        }
+    }
+
+    return new ArrayList<>(videoUrls);
+}
+```
+
+##### Live Photo 的完整提取
+
+Live Photo 需要同时提取封面图片和视频：
+
+```java
+private List<String> extractTraceIdUrls(String html) {
+    List<String> urls = new ArrayList<>();
+
+    Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+    Matcher matcher = imageListPattern.matcher(html);
+
+    if (matcher.find()) {
+        String imageListJson = matcher.group(1);
+
+        // 提取所有 traceId（包括普通图片和 Live Photo 的封面）
+        Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
+        Matcher traceIdMatcher = traceIdPattern.matcher(imageListJson);
+
+        while (traceIdMatcher.find()) {
+            String traceId = traceIdMatcher.group(1);
+            // 使用 ci.xiaohongshu.com 域名获取无水印图片
+            urls.add("https://ci.xiaohongshu.com/" + traceId);
+        }
+    }
+
+    return urls;
+}
+```
+
+### 综合策略（图片+视频）
+
+```java
+private Map<String, Object> extractImagesViaHtml(String sourceUrl) {
+    FetchResult fetchResult = fetch(sourceUrl);
+    String html = fetchResult.html();
+    String title = extractTitle(html);
+
+    // 提取图片和视频
+    List<String> images = collectImageUrls(html);
+    List<String> videos = collectVideoUrls(html);
+
+    if (images.isEmpty() && videos.isEmpty()) {
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+            "No downloadable image or video was recognized");
+    }
+
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("sourceUrl", sourceUrl);
+    result.put("title", title);
+
+    if (!images.isEmpty()) {
+        result.put("imageCount", images.size());
+        result.put("images", images);
+    }
+
+    if (!videos.isEmpty()) {
+        result.put("videoCount", videos.size());
+        result.put("videos", videos);
+    }
+
+    return result;
+}
+```
+
+### 图片综合策略
 
 ```java
 private List<String> collectImageUrls(String html) {
@@ -147,11 +279,20 @@ private List<String> collectImageUrls(String html) {
 
 ### 1. CDN 域名对比
 
+#### 图片 CDN
+
 | 域名 | 用途 | 是否有水印 |
 |------|------|-----------|
 | `sns-webpic-qc.xhscdn.com` | 网页展示用 CDN | 有水印（带参数时） |
 | `sns-img-qc.xhscdn.com` | 图片存储 CDN | 可能有水印 |
 | `ci.xiaohongshu.com` | 内容接口 | 无水印原图 |
+
+#### 视频 CDN
+
+| 域名 | 用途 | 说明 |
+|------|------|------|
+| `sns-video-bd.xhscdn.com` | 视频存储 CDN | 原始视频，无水印 |
+| `sns-video-qc.xhscdn.com` | 视频存储 CDN（备用） | 原始视频，无水印 |
 
 ### 2. 水印参数识别
 
@@ -164,6 +305,8 @@ private List<String> collectImageUrls(String html) {
 
 ### 3. 正则表达式说明
 
+#### 图片提取
+
 ```java
 // 匹配 imageList 数组（使用 DOTALL 模式匹配多行）
 Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
@@ -172,13 +315,32 @@ Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", 
 Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
 ```
 
+#### 视频提取
+
+```java
+// 匹配 video.consumer.originVideoKey
+Pattern originVideoKeyPattern = Pattern.compile(
+    "\"video\"\\s*:\\s*\\{[^}]*\"consumer\"\\s*:\\s*\\{[^}]*\"originVideoKey\"\\s*:\\s*\"([^\"]+)\"",
+    Pattern.DOTALL
+);
+
+// 匹配 h265 数组
+Pattern h265Pattern = Pattern.compile("\"h265\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+
+// 匹配 url 或 masterUrl
+Pattern urlPattern = Pattern.compile("\"(?:url|masterUrl)\"\\s*:\\s*\"([^\"]+)\"");
+```
+
+**说明：**
 - `\\s*` - 匹配可能的空白字符
 - `(.*?)` - 非贪婪匹配任意内容
 - `Pattern.DOTALL` - 让 `.` 可以匹配换行符
+- `[^}]*` - 匹配除了 `}` 之外的任意字符（避免跨对象匹配）
+- `(?:url|masterUrl)` - 非捕获组，匹配 url 或 masterUrl
 
 ## 测试验证
 
-### 测试用例
+### 图片测试用例
 
 ```java
 // 原始带水印 URL
@@ -189,36 +351,167 @@ String unwatermarkedUrl = transformXhsCdnUrl(watermarkedUrl);
 // 结果: https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnqk
 ```
 
+### 视频测试用例
+
+```java
+// originVideoKey
+String originVideoKey = "spectrum/1040g34o30s6qcqhm5u005p7bnqkgbqhm5u0bnqk";
+
+// 构造视频 URL
+String videoUrl = "https://sns-video-bd.xhscdn.com/" + originVideoKey;
+// 结果: https://sns-video-bd.xhscdn.com/spectrum/1040g34o30s6qcqhm5u005p7bnqkgbqhm5u0bnqk
+```
+
 ### 验证方法
 
+#### 图片验证
 1. 访问转换前的 URL - 图片带水印
 2. 访问转换后的 URL - 图片无水印
 3. 对比两张图片的视觉效果
 
-## 注意事项
+#### 视频验证
+1. 访问视频 URL - 可直接播放或下载
+2. 检查视频是否包含水印
+3. 验证视频清晰度和完整性
 
-### 1. 视频 URL 处理
-视频 URL 不需要转换，保持原样：
-```java
-if (originalUrl.contains("video") || originalUrl.contains("sns-video")) {
-    return originalUrl;
+### API 响应示例
+
+#### 纯图片帖子
+```json
+{
+  "sourceUrl": "https://www.xiaohongshu.com/explore/...",
+  "title": "帖子标题",
+  "imageCount": 3,
+  "images": [
+    "https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnqk",
+    "https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnql",
+    "https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnqm"
+  ]
 }
 ```
+
+#### 纯视频帖子
+```json
+{
+  "sourceUrl": "https://www.xiaohongshu.com/explore/...",
+  "title": "视频标题",
+  "videoCount": 1,
+  "videos": [
+    "https://sns-video-bd.xhscdn.com/spectrum/1040g34o30s6qcqhm5u005p7bnqkgbqhm5u0bnqk"
+  ]
+}
+```
+
+#### 混合帖子（图片+视频）
+```json
+{
+  "sourceUrl": "https://www.xiaohongshu.com/explore/...",
+  "title": "混合内容",
+  "imageCount": 2,
+  "images": [
+    "https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnqk",
+    "https://ci.xiaohongshu.com/1040g2sg30s6qcqhm5u005p7bnqkgbqhm5u0bnql"
+  ],
+  "videoCount": 1,
+  "videos": [
+    "https://sns-video-bd.xhscdn.com/spectrum/1040g34o30s6qcqhm5u005p7bnqkgbqhm5u0bnqk"
+  ]
+}
+```
+
+## 注意事项
+
+### 1. 媒体类型识别
+- 图片帖子：包含 `imageList` 字段
+- 纯视频帖子：包含 `video` 字段（**不支持，视频有水印**）
+- Live Photo 帖子：`imageList` 中的对象包含 `stream` 字段
+- 混合帖子：普通图片 + Live Photo
 
 ### 2. URL 格式兼容性
 - 处理 Unicode 转义：`\u002F` → `/`
 - 处理 HTML 实体：`&amp;` → `&`
 - 确保 URL 以 `http://` 或 `https://` 开头
 
-### 3. 错误处理
-- 如果 traceId 提取失败，回退到 URL 转换方式
-- 如果两种方式都失败，返回空列表并提示用户
+### 3. Live Photo 封面图片显示问题
+部分 Live Photo 的封面图片可能无法在浏览器中直接显示（跨域或权限问题），但可以正常下载。
+
+**前端处理方案**：
+```javascript
+// 添加 onerror 处理，显示占位符
+<img src="${url}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+<div style="display:none">Image preview unavailable<br>Click Download to save</div>
+```
+
+### 4. 错误处理
+- 如果图片 traceId 提取失败，回退到 URL 转换方式
+- 如果是纯视频帖子（没有图片），返回错误提示
+- 如果 Live Photo 视频提取失败，仍然返回封面图片
+
+### 5. Live Photo 处理（重要）
+
+Live Photo 是小红书的特殊格式，包含一张封面图片和一个短视频：
+
+**关键规则**：
+- **同时提取封面和视频**：Live Photo 的封面图片和视频都应该被提取
+- **封面可能无法预览**：部分封面图片可能无法在浏览器中显示，但可以正常下载
+- **视频是无水印的**：Live Photo 的视频是无水印的
+
+**识别方法**：
+```java
+// 在 imageList 中，如果图片对象包含 stream 字段，说明是 Live Photo
+if (imageObject.contains("\"stream\"")) {
+    // 这是 Live Photo，提取封面图片和视频
+}
+```
+
+**提取逻辑**：
+1. 提取所有 `traceId` 作为图片（包括普通图片和 Live Photo 的封面）
+2. 提取所有 `stream.h264[0].masterUrl` 作为 Live Photo 的视频
+
+**示例**：
+```json
+{
+  "imageList": [
+    {
+      "traceId": "abc123",
+      // 没有 stream 字段 → 普通图片
+    },
+    {
+      "traceId": "def456",
+      "stream": {
+        "h264": [{"masterUrl": "https://..."}]
+      }
+      // 有 stream 字段 → Live Photo，提取封面和视频
+    }
+  ]
+}
+```
 
 ## 性能优化
 
 1. **使用 LinkedHashSet 去重**：保持顺序的同时避免重复 URL
-2. **优先级策略**：先尝试最可靠的 traceId 方式，失败后再尝试 URL 转换
+2. **优先级策略**：
+   - 图片：先尝试 traceId 方式，失败后再尝试 URL 转换
+   - 视频：先尝试 originVideoKey，失败后再尝试 h265 流
 3. **正则预编译**：将常用正则表达式定义为静态常量
+4. **并行提取**：图片和视频提取可以并行进行（如果需要）
+
+## 支持的媒体格式
+
+### 图片格式
+- JPEG / JPG
+- PNG
+- WebP
+- HEIC (iOS)
+
+### 视频格式
+- MP4 (H.265/HEVC 编码)
+- MOV (部分 iOS 上传的视频)
+
+### 特殊格式
+- Live Photo（静态图片 + 短视频）
+- 全景图片
+- 长图
 
 ## 参考资源
 
@@ -228,17 +521,119 @@ if (originalUrl.contains("video") || originalUrl.contains("sns-video")) {
 
 ## 更新日志
 
+- **2026-03-19 v5**：修复 Live Photo 视频提取失败的问题（使用两步匹配策略）
+- **2026-03-19 v5**：改为显示 HEIC 格式提示信息，不做格式转换（保持原始质量）
+- **2026-03-19 v4**：修复 HEIC 格式图片无法显示的问题（添加 `?imageView2/format/jpg` 参数）
+- **2026-03-19 v4**：修复解析不全的问题（直接在整个 HTML 中搜索 traceId，不限制在 imageList 内）
+- **2026-03-19 v4**：简化视频提取正则表达式，提高匹配成功率
+- **2026-03-19 v3**：放弃纯视频帖子的提取（视频有水印）
+- **2026-03-19 v3**：修改 Live Photo 处理逻辑，同时提取封面和视频
+- **2026-03-19 v3**：添加图片预览失败的占位符处理
+- **2026-03-19 v2**：修复 Live Photo 处理逻辑，只提取视频部分，不提取静态图片
+- **2026-03-19 v2**：确认 `originVideoKey` 构造的视频 URL 是无水印的
+- **2026-03-19 v2**：优化图片提取逻辑，排除 Live Photo 的静态图片
+- **2026-03-19**：添加视频提取功能，支持 originVideoKey 和 h265 流
+- **2026-03-19**：支持混合媒体帖子（图片+视频）
 - **2026-03-19**：实现基于 traceId 的无水印图片提取
 - **2026-03-19**：添加 URL 转换备用方案
 - **2026-03-19**：完善错误处理和回退机制
 
 ## 总结
 
-通过分析小红书的页面结构和 CDN 机制，我们实现了两种互补的无水印图片提取方案：
+通过分析小红书的页面结构和 CDN 机制，我们实现了完整的无水印媒体提取方案：
 
+### 图片提取
 1. **traceId 方案**：从 JSON 数据直接提取官方标识符，最可靠
 2. **URL 转换方案**：通过解析和转换 CDN URL，作为备用方案
+3. **包含 Live Photo 封面**：提取所有 `traceId`，包括 Live Photo 的封面图片
 
-核心思路是：**使用 `ci.xiaohongshu.com` 域名 + 去除水印参数 = 无水印原图**
+### Live Photo 提取
+1. **封面图片**：从 `traceId` 提取（可能无法预览，但可以下载）
+2. **视频部分**：从 `stream.h264` 提取（无水印）
 
-这种方法不依赖第三方 API，稳定性高，且符合小红书的 CDN 架构设计。
+### 核心思路
+- **图片**：使用 `ci.xiaohongshu.com` 域名 + traceId = 无水印原图
+- **Live Photo 视频**：从 `stream.h264[0].masterUrl` 提取 = 无水印短视频
+- **纯视频帖子**：不支持（视频有水印）
+
+### 关键发现
+1. **Live Photo 的封面和视频都是无水印的**
+2. **Live Photo 的封面可能无法在浏览器中预览**：但可以正常下载
+3. **纯视频帖子的视频有水印**：无法通过简单的 URL 转换去除
+4. **小红书帖子类型**：
+   - 纯图片帖子（支持）
+   - 纯视频帖子（不支持，有水印）
+   - Live Photo 帖子（支持，封面+视频都无水印）
+   - 混合帖子：普通图片 + Live Photo（支持）
+
+这种方法不依赖第三方 API，直接利用小红书自己的 CDN 架构，稳定性高且支持多种媒体格式。
+
+## 常见问题
+
+### 1. HEIC 格式图片无法在浏览器中显示
+
+**问题**：部分图片下载后是 HEIC 格式，浏览器无法预览
+
+**解决方案**：显示友好的提示信息，告知用户点击 Download 下载
+
+```javascript
+// 图片加载失败时显示提示
+<img src="${url}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+<div style="display:none">
+    📷
+    The image format does not support preview for the time being
+    Click Download to save
+</div>
+```
+
+**注意**：不对 URL 做格式转换，保持原始 HEIC 格式，确保图片质量。
+
+### 2. 解析不全，每次解析结果不一致
+
+**问题**：同一个链接，每次解析的图片数量不同
+
+**原因**：使用 `\"imageList\"\\s*:\\s*\\[(.*?)\\]` 的非贪婪匹配 `(.*?)` 在遇到嵌套的 `]` 时会提前结束
+
+**解决方案**：不限制在 `imageList` 数组内，直接在整个 HTML 中搜索所有 `traceId`
+
+```java
+// 错误的方式（会解析不全）
+Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+
+// 正确的方式（完整解析）
+Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
+Matcher traceIdMatcher = traceIdPattern.matcher(html); // 直接在整个 HTML 中搜索
+```
+
+### 3. Live Photo 视频提取不全
+
+**问题**：部分 Live Photo 的视频没有被提取
+
+**原因**：正则表达式太宽泛或太严格，无法正确匹配所有情况
+
+**解决方案**：使用两步匹配策略
+
+```java
+// 方法 1：匹配 h264 数组
+Pattern h264Pattern = Pattern.compile("\"h264\"\\s*:\\s*\\[([^\\]]+)\\]");
+Matcher h264Matcher = h264Pattern.matcher(html);
+
+while (h264Matcher.find()) {
+    String h264Content = h264Matcher.group(1);
+
+    // 在 h264 数组内容中查找 masterUrl 或 url
+    Pattern urlPattern = Pattern.compile("\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
+    Matcher urlMatcher = urlPattern.matcher(h264Content);
+
+    while (urlMatcher.find()) {
+        String videoUrl = urlMatcher.group(1);
+        videoUrls.add(normalizeEscapedUrl(videoUrl));
+    }
+}
+
+// 方法 2：如果方法 1 没找到，尝试直接匹配 stream 相关的视频 URL
+if (videoUrls.isEmpty()) {
+    Pattern streamPattern = Pattern.compile("\"stream\"[^}]*\"(?:masterUrl|url)\"\\s*:\\s*\"([^\"]+)\"");
+    // ...
+}
+```
