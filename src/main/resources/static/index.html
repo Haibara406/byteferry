@@ -15,6 +15,7 @@
                 <nav class="pill-group" id="mode-nav">
                     <button class="pill active" data-mode="quick">Quick</button>
                     <button class="pill" data-mode="session">Session</button>
+                    <button class="pill" data-mode="xhs">XHS</button>
                     <button class="pill hidden" data-mode="space" id="nav-space">Space</button>
                     <button class="pill hidden" data-mode="friend" id="nav-friend">Friends</button>
                 </nav>
@@ -421,6 +422,25 @@
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div class="view hidden" id="view-xhs">
+            <section class="panel fade-in">
+                <div class="card">
+                    <label class="label">小红书分享链接</label>
+                    <div class="row gap xhs-input-row">
+                        <textarea id="xhs-url" class="textarea xhs-url-input" rows="3" placeholder="粘贴小红书帖子的分享链接，支持包含文字的一整段分享内容"></textarea>
+                        <button class="btn btn-primary" id="xhs-extract-btn">提取图片</button>
+                    </div>
+                    <div class="row gap xhs-actions hidden" id="xhs-actions">
+                        <button class="btn-link" id="xhs-copy-links">复制全部链接</button>
+                        <button class="btn-link" id="xhs-select-all">全选</button>
+                        <button class="btn-link" id="xhs-download-selected">下载选中</button>
+                    </div>
+                    <div id="xhs-error" class="error-card hidden mt"></div>
+                    <div id="xhs-result" class="hidden mt"></div>
+                </div>
+            </section>
         </div>
     </main>
     <footer class="site-footer">

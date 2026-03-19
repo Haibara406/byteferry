@@ -7,6 +7,7 @@ let friendWs = null, activeFSession = null, fSessionAttach = [], fSessionTimerId
 let notifications = [];
 let closedSessions = new Set(); // Track closed sessions to prevent re-entry
 let activeHistoryId = null;
+let xhsImages = [];
 let currentMainTab = 'quick', currentSubTab = null;
 const LOGIN_MEMORY_KEY = 'bf_login_memory';
 
@@ -19,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.classList.add('active');
             show('view-quick', btn.dataset.mode === 'quick');
             show('view-session', btn.dataset.mode === 'session');
+            show('view-xhs', btn.dataset.mode === 'xhs');
             show('view-space', btn.dataset.mode === 'space');
             show('view-friend', btn.dataset.mode === 'friend');
             if (btn.dataset.mode !== 'session') stopRecvPoll();
@@ -61,6 +63,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Quick receive
     $('qr-get-btn').addEventListener('click', quickRecv);
     $('qr-code').addEventListener('keydown', e => { if (e.key === 'Enter') quickRecv(); });
+    $('xhs-extract-btn').addEventListener('click', xhsExtractImages);
+    $('xhs-url').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            xhsExtractImages();
+        }
+    });
+    $('xhs-copy-links').addEventListener('click', xhsCopyLinks);
+    $('xhs-select-all').addEventListener('click', xhsSelectAll);
+    $('xhs-download-selected').addEventListener('click', xhsDownloadSelected);
 
     // Session expire chips
     document.querySelectorAll('#expire-bar .type-chip').forEach(btn => {
@@ -229,7 +241,7 @@ function restoreFromHash() {
     const parts = hash.split('/');
     const mainTab = parts[0];
     const subTab = parts[1] || null;
-    const validMain = ['quick', 'session', 'space', 'friend'];
+    const validMain = ['quick', 'session', 'xhs', 'space', 'friend'];
     if (!validMain.includes(mainTab)) return;
     // For space/friend, only restore if logged in
     if ((mainTab === 'space' || mainTab === 'friend') && !getToken()) return;
@@ -531,6 +543,88 @@ function sessLeave() {
 
 function stopRecvPoll() {
     if (recvPollId) { clearInterval(recvPollId); recvPollId = null; }
+}
+
+async function xhsExtractImages() {
+    const input = $('xhs-url').value.trim();
+    if (!input) {
+        showToast('请先粘贴小红书链接', 'error');
+        return;
+    }
+    const btn = $('xhs-extract-btn');
+    btn.disabled = true;
+    btn.textContent = '提取中...';
+    show('xhs-error', false);
+    show('xhs-result', false);
+    show('xhs-actions', false);
+    try {
+        const resp = await fetch('/api/xhs/extract-images', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: input })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.message || '提取失败');
+        xhsImages = Array.isArray(data.images) ? data.images : [];
+        if (!xhsImages.length) throw new Error('未提取到图片');
+        renderXhsResult(data.title || '小红书帖子', data.sourceUrl || input, xhsImages);
+        show('xhs-actions', true);
+        show('xhs-result', true);
+        showToast('已提取 ' + xhsImages.length + ' 张图片', 'success');
+    } catch (e) {
+        show('xhs-error', true);
+        $('xhs-error').innerHTML = `<p>${esc(e.message || '提取失败')}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '提取图片';
+    }
+}
+
+function renderXhsResult(title, sourceUrl, images) {
+    const result = $('xhs-result');
+    let html = '<div class="xhs-result-head">';
+    html += `<p><strong>${esc(title)}</strong></p>`;
+    html += `<p class="muted" style="margin-top:4px;word-break:break-all">${esc(sourceUrl)}</p>`;
+    html += '</div>';
+    html += '<div class="xhs-grid">';
+    images.forEach((url, idx) => {
+        html += '<div class="xhs-item">';
+        html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" checked><span class="xhs-index">第 ${idx + 1} 张</span></label>`;
+        html += `<a class="xhs-img-wrap" href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(url)}" alt="xhs-${idx + 1}"></a>`;
+        html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-${idx + 1}.jpg">下载</button>`;
+        html += '</div>';
+    });
+    html += '</div>';
+    result.innerHTML = html;
+    result.querySelectorAll('[data-xhs-dl]').forEach(btn => {
+        btn.addEventListener('click', () => dl(btn.dataset.xhsDl, btn.dataset.name));
+    });
+}
+
+function xhsCopyLinks() {
+    if (!xhsImages.length) {
+        showToast('当前没有可复制链接', 'error');
+        return;
+    }
+    copyText(xhsImages.join('\n'));
+}
+
+function xhsSelectAll() {
+    const checks = document.querySelectorAll('.xhs-item-check');
+    if (!checks.length) return;
+    checks.forEach(c => { c.checked = true; });
+    showToast('已全选');
+}
+
+function xhsDownloadSelected() {
+    const selected = Array.from(document.querySelectorAll('.xhs-item-check:checked')).map(c => c.dataset.url);
+    if (!selected.length) {
+        showToast('请先选择图片', 'error');
+        return;
+    }
+    selected.forEach((url, idx) => {
+        setTimeout(() => dl(url, 'xhs-' + (idx + 1) + '.jpg'), idx * 120);
+    });
 }
 
 /* ==================== Timeline Renderer ==================== */

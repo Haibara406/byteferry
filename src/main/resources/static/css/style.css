@@ -159,6 +159,35 @@ header {
 .label { display: block; font-size: 0.875rem; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; color: var(--text2); margin: 12px 0; cursor: pointer; }
 .checkbox-row input { accent-color: var(--blue); }
+.xhs-input-row { align-items: stretch; }
+.xhs-url-input { flex: 1; min-height: 102px; }
+.xhs-input-row .btn { min-width: 116px; }
+.xhs-actions { margin-top: 12px; flex-wrap: wrap; }
+.xhs-result-head { margin-bottom: 10px; }
+.xhs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.xhs-item {
+    background: rgba(255,255,255,0.68);
+    border: 1px solid rgba(214,223,255,0.84);
+    border-radius: var(--radius-sm);
+    padding: 10px;
+}
+.xhs-check-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.xhs-check-row input { accent-color: var(--blue); }
+.xhs-index { font-size: 0.8rem; color: var(--text2); font-weight: 600; }
+.xhs-img-wrap {
+    border-radius: 8px;
+    overflow: hidden;
+    background: #eef2ff;
+    display: block;
+    margin-bottom: 8px;
+}
+.xhs-img-wrap img {
+    width: 100%;
+    height: 168px;
+    object-fit: cover;
+    display: block;
+}
+.xhs-item .btn-link { display: inline-block; }
 
 /* ==================== Buttons ==================== */
 .btn {
@@ -781,6 +810,8 @@ button:not(:disabled):active,
     .code-display.small { font-size: 1.3rem; }
     .code-input { font-size: 1.3rem; }
     .img-grid { grid-template-columns: 1fr; }
+    .xhs-grid { grid-template-columns: 1fr; }
+    .xhs-input-row { flex-direction: column; }
     .header-right { gap: 8px; }
     .pill { padding: 6px 14px; font-size: 0.8rem; }
     .modal-card { border-radius: 14px; }
