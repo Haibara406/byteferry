@@ -548,12 +548,12 @@ function stopRecvPoll() {
 async function xhsExtractImages() {
     const input = $('xhs-url').value.trim();
     if (!input) {
-        showToast('请先粘贴小红书链接', 'error');
+        showToast('Please paste the rednote link first', 'error');
         return;
     }
     const btn = $('xhs-extract-btn');
     btn.disabled = true;
-    btn.textContent = '提取中...';
+    btn.textContent = 'Extracting...';
     show('xhs-error', false);
     show('xhs-result', false);
     show('xhs-actions', false);
@@ -564,19 +564,19 @@ async function xhsExtractImages() {
             body: JSON.stringify({ url: input })
         });
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.message || '提取失败');
+        if (!resp.ok) throw new Error(data.message || 'Extraction failed');
         xhsImages = Array.isArray(data.images) ? data.images : [];
-        if (!xhsImages.length) throw new Error('未提取到图片');
-        renderXhsResult(data.title || '小红书帖子', data.sourceUrl || input, xhsImages);
+        if (!xhsImages.length) throw new Error('No image extracted');
+        renderXhsResult(data.title || 'rednote post', data.sourceUrl || input, xhsImages);
         show('xhs-actions', true);
         show('xhs-result', true);
-        showToast('已提取 ' + xhsImages.length + ' 张图片', 'success');
+        showToast(xhsImages.length + ' images have been extracted', 'success');
     } catch (e) {
         show('xhs-error', true);
-        $('xhs-error').innerHTML = `<p>${esc(e.message || '提取失败')}</p>`;
+        $('xhs-error').innerHTML = `<p>${esc(e.message || 'Extraction failed')}</p>`;
     } finally {
         btn.disabled = false;
-        btn.textContent = '提取图片';
+        btn.textContent = 'Extract the picture';
     }
 }
 
@@ -589,9 +589,9 @@ function renderXhsResult(title, sourceUrl, images) {
     html += '<div class="xhs-grid">';
     images.forEach((url, idx) => {
         html += '<div class="xhs-item">';
-        html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" checked><span class="xhs-index">第 ${idx + 1} 张</span></label>`;
+        html += `<label class="xhs-check-row"><input type="checkbox" class="xhs-item-check" data-url="${esc(url)}" checked><span class="xhs-index">Image #${idx + 1}</span></label>`;
         html += `<a class="xhs-img-wrap" href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(url)}" alt="xhs-${idx + 1}"></a>`;
-        html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-${idx + 1}.jpg">下载</button>`;
+        html += `<button class="btn-link sm" data-xhs-dl="${esc(url)}" data-name="xhs-${idx + 1}.jpg">Download</button>`;
         html += '</div>';
     });
     html += '</div>';
@@ -603,7 +603,7 @@ function renderXhsResult(title, sourceUrl, images) {
 
 function xhsCopyLinks() {
     if (!xhsImages.length) {
-        showToast('当前没有可复制链接', 'error');
+        showToast('There are currently no replicable links', 'error');
         return;
     }
     copyText(xhsImages.join('\n'));
@@ -613,13 +613,13 @@ function xhsSelectAll() {
     const checks = document.querySelectorAll('.xhs-item-check');
     if (!checks.length) return;
     checks.forEach(c => { c.checked = true; });
-    showToast('已全选');
+    showToast('All selected');
 }
 
 function xhsDownloadSelected() {
     const selected = Array.from(document.querySelectorAll('.xhs-item-check:checked')).map(c => c.dataset.url);
     if (!selected.length) {
-        showToast('请先选择图片', 'error');
+        showToast('Please select the picture first', 'error');
         return;
     }
     selected.forEach((url, idx) => {

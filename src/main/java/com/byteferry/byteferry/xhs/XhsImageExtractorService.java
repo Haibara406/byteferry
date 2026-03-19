@@ -39,6 +39,142 @@ public class XhsImageExtractorService {
         String sourceUrl = extractUrlFromInput(rawInput);
         validateXhsDomain(sourceUrl);
 
+        // 优先使用第三方 API 获取无水印图片
+        try {
+            return extractImagesViaApi(sourceUrl);
+        } catch (Exception e) {
+            System.out.println("API 方式失败，尝试直接解析 HTML: " + e.getMessage());
+            // 如果 API 失败，回退到直接解析 HTML
+            return extractImagesViaHtml(sourceUrl);
+        }
+    }
+
+    private Map<String, Object> extractImagesViaApi(String sourceUrl) {
+        String apiUrl = "http://www.mobanso.com/api/shortcuts/redBook";
+        String requestBody = "{\"url\":\"" + sourceUrl + "\"}";
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(apiUrl))
+                .timeout(Duration.ofSeconds(15))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "2fa6aae79b45267814318c33e7afc8c7")
+                .header("Version", "1.0.0")
+                .header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            System.out.println("=== API 响应 ===");
+            System.out.println("状态码: " + response.statusCode());
+            System.out.println("响应体: " + response.body());
+            System.out.println("=== 结束 ===");
+
+            if (response.statusCode() != 200) {
+                throw new RuntimeException("API 返回状态码: " + response.statusCode());
+            }
+
+            // 解析 API 响应
+            return parseApiResponse(response.body(), sourceUrl);
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw new RuntimeException("API 请求失败: " + e.getMessage(), e);
+        }
+    }
+
+    private Map<String, Object> parseApiResponse(String jsonResponse, String sourceUrl) {
+        try {
+            System.out.println("开始解析 API 响应...");
+
+            // 检查 errcode
+            int errcode = extractIntValue(jsonResponse, "errcode");
+            if (errcode != 0) {
+                String errmsg = extractStringValue(jsonResponse, "errmsg");
+                throw new RuntimeException("API 返回错误: " + errmsg + " (errcode: " + errcode + ")");
+            }
+
+            // 提取 images 数组
+            List<String> images = extractArrayValues(jsonResponse, "images");
+
+            // 提取标题
+            String title = extractStringValue(jsonResponse, "title");
+            if (title == null || title.isBlank()) {
+                title = "小红书帖子";
+            }
+
+            if (images.isEmpty()) {
+                throw new RuntimeException("API 未返回图片");
+            }
+
+            System.out.println("成功解析到 " + images.size() + " 张图片");
+
+            return Map.of(
+                    "sourceUrl", sourceUrl,
+                    "title", title,
+                    "imageCount", images.size(),
+                    "images", images
+            );
+        } catch (Exception e) {
+            throw new RuntimeException("解析 API 响应失败: " + e.getMessage(), e);
+        }
+    }
+
+    private int extractIntValue(String json, String key) {
+        String pattern = "\"" + key + "\":";
+        int start = json.indexOf(pattern);
+        if (start == -1) return 0;
+
+        start += pattern.length();
+        int end = start;
+        while (end < json.length() && (Character.isDigit(json.charAt(end)) || json.charAt(end) == '-')) {
+            end++;
+        }
+
+        try {
+            return Integer.parseInt(json.substring(start, end).trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private String extractStringValue(String json, String key) {
+        String pattern = "\"" + key + "\":\"";
+        int start = json.indexOf(pattern);
+        if (start == -1) return null;
+
+        start += pattern.length();
+        int end = json.indexOf("\"", start);
+        if (end == -1) return null;
+
+        return json.substring(start, end);
+    }
+
+    private List<String> extractArrayValues(String json, String key) {
+        List<String> values = new ArrayList<>();
+        String pattern = "\"" + key + "\":[";
+        int start = json.indexOf(pattern);
+        if (start == -1) return values;
+
+        int arrayStart = start + pattern.length();
+        int arrayEnd = json.indexOf("]", arrayStart);
+        if (arrayEnd == -1) return values;
+
+        String arrayContent = json.substring(arrayStart, arrayEnd);
+        String[] items = arrayContent.split(",");
+
+        for (String item : items) {
+            String cleaned = item.trim().replace("\"", "");
+            if (!cleaned.isEmpty() && cleaned.startsWith("http")) {
+                values.add(cleaned);
+            }
+        }
+
+        return values;
+    }
+
+    private Map<String, Object> extractImagesViaHtml(String sourceUrl) {
         FetchResult fetchResult = fetch(sourceUrl);
         String finalUrl = fetchResult.finalUrl();
         String html = fetchResult.html();
@@ -134,35 +270,103 @@ public class XhsImageExtractorService {
     }
 
     private List<String> collectImageUrls(String html) {
-        // 使用 LinkedHashMap 来保持顺序，key 是文件名（用于去重），value 是完整 URL
-        Map<String, String> imageMap = new LinkedHashMap<>();
+        Set<String> imageUrls = new LinkedHashSet<>();
+
+        // 方法 1：从 JSON 数据中提取 traceId（最可靠的无水印方式）
+        List<String> traceIdUrls = extractTraceIdUrls(html);
+        imageUrls.addAll(traceIdUrls);
+
+        // 方法 2：如果没有找到 traceId，尝试转换现有 URL
+        if (imageUrls.isEmpty()) {
+            List<String> transformedUrls = extractAndTransformUrls(html);
+            imageUrls.addAll(transformedUrls);
+        }
+
+        return new ArrayList<>(imageUrls);
+    }
+
+    /**
+     * 从 HTML 中的 JSON 数据提取 traceId 并构造无水印 URL
+     */
+    private List<String> extractTraceIdUrls(String html) {
+        List<String> urls = new ArrayList<>();
+
+        // 查找 imageList 数组
+        Pattern imageListPattern = Pattern.compile("\"imageList\"\\s*:\\s*\\[(.*?)\\]", Pattern.DOTALL);
+        Matcher matcher = imageListPattern.matcher(html);
+
+        if (matcher.find()) {
+            String imageListJson = matcher.group(1);
+
+            // 提取所有 traceId
+            Pattern traceIdPattern = Pattern.compile("\"traceId\"\\s*:\\s*\"([^\"]+)\"");
+            Matcher traceIdMatcher = traceIdPattern.matcher(imageListJson);
+
+            while (traceIdMatcher.find()) {
+                String traceId = traceIdMatcher.group(1);
+                // 使用 ci.xiaohongshu.com 域名获取无水印图片
+                urls.add("https://ci.xiaohongshu.com/" + traceId);
+            }
+        }
+
+        return urls;
+    }
+
+    /**
+     * 提取并转换 xhscdn.com URL 为无水印版本
+     */
+    private List<String> extractAndTransformUrls(String html) {
+        List<String> urls = new ArrayList<>();
 
         Matcher matcher = SHORTCUT_IMAGE_PATTERN.matcher(html);
         while (matcher.find()) {
             String matched = matcher.group(1);
             String normalized = normalizeEscapedUrl(matched);
 
-            if (normalized != null && normalized.contains("!h5_1080jpg")) {
-                // 提取文件名部分（URL 的最后一段，用于去重）
-                // 例如：1040g00831tq55abqne005nss8acg891o0ncfpig!h5_1080jpg
-                String fileName = extractFileName(normalized);
-
-                // 只保留第一次出现的版本（来自 <img src>，通常是高清无水印版本）
-                if (fileName != null && !imageMap.containsKey(fileName)) {
-                    imageMap.put(fileName, normalized);
+            if (normalized != null && normalized.contains("xhscdn.com")) {
+                String transformed = transformXhsCdnUrl(normalized);
+                if (transformed != null && !urls.contains(transformed)) {
+                    urls.add(transformed);
                 }
             }
         }
 
-        return new ArrayList<>(imageMap.values());
+        return urls;
     }
 
-    private String extractFileName(String url) {
-        int lastSlash = url.lastIndexOf('/');
-        if (lastSlash != -1 && lastSlash < url.length() - 1) {
-            return url.substring(lastSlash + 1);
+    /**
+     * 转换 xhscdn.com URL 为无水印版本
+     * 从 http://sns-webpic-qc.xhscdn.com/202404121854/a7e6fa93538d17fa5da39ed6195557d7/{token}!nd_dft_wlteh_webp_3
+     * 转换为 https://ci.xiaohongshu.com/{token}
+     */
+    private String transformXhsCdnUrl(String originalUrl) {
+        if (originalUrl == null || !originalUrl.contains("xhscdn.com")) {
+            return originalUrl;
         }
-        return null;
+
+        // 跳过视频 URL
+        if (originalUrl.contains("video") || originalUrl.contains("sns-video")) {
+            return originalUrl;
+        }
+
+        // 提取 token：从第 5 个 / 之后的部分
+        String[] parts = originalUrl.split("/");
+        if (parts.length > 5) {
+            StringBuilder tokenBuilder = new StringBuilder();
+            for (int i = 5; i < parts.length; i++) {
+                if (i > 5) tokenBuilder.append("/");
+                tokenBuilder.append(parts[i]);
+            }
+            String fullToken = tokenBuilder.toString();
+
+            // 去掉 ! 或 ? 之后的参数（这些参数会添加水印）
+            String token = fullToken.split("[!?]")[0];
+
+            // 使用 ci.xiaohongshu.com 获取无水印图片
+            return "https://ci.xiaohongshu.com/" + token;
+        }
+
+        return originalUrl;
     }
 
     private String normalizeEscapedUrl(String raw) {
