@@ -263,9 +263,10 @@ function restoreFromHash() {
 function showToast(msg, type = 'normal') {
     const t = $('toast');
     t.textContent = msg;
-    t.classList.remove('error', 'success');
+    t.classList.remove('error', 'success', 'normal');
     if (type === 'error') t.classList.add('error');
     else if (type === 'success') t.classList.add('success');
+    else t.classList.add('normal');
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 3000);
 }
