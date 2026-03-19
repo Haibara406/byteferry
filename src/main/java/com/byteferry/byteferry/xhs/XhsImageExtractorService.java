@@ -49,12 +49,12 @@ public class XhsImageExtractorService {
         List<String> images = collectImageUrls(html);
 
         if (images.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未识别到可下载图片，请确认是公开的小红书图文帖分享链接");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No downloadable image was recognized. Please confirm that it is a public link to a Xiaohongshu image and text post");
         }
 
         return Map.of(
                 "sourceUrl", finalUrl,
-                "title", title == null || title.isBlank() ? "小红书帖子" : title,
+                "title", title == null || title.isBlank() ? "rednote post" : title,
                 "imageCount", images.size(),
                 "images", images
         );
@@ -62,7 +62,7 @@ public class XhsImageExtractorService {
 
     private String extractUrlFromInput(String rawInput) {
         if (rawInput == null || rawInput.isBlank()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "请提供分享链接");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Please provide the sharing link");
         }
         String trimmed = rawInput.trim();
         Matcher matcher = URL_IN_TEXT_PATTERN.matcher(trimmed);
@@ -73,11 +73,11 @@ public class XhsImageExtractorService {
         try {
             URI parsed = new URI(url);
             if (parsed.getHost() == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "链接格式不正确");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The link format is incorrect");
             }
             return url;
         } catch (URISyntaxException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "链接格式不正确");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The link format is incorrect");
         }
     }
 
@@ -85,17 +85,17 @@ public class XhsImageExtractorService {
         try {
             String host = new URI(url).getHost();
             if (host == null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "链接格式不正确");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The link format is incorrect");
             }
             String lowered = host.toLowerCase();
             boolean valid = lowered.endsWith("xiaohongshu.com")
                     || lowered.endsWith("xhslink.com")
                     || lowered.endsWith("xhscdn.com");
             if (!valid) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "仅支持小红书分享链接");
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only links shared on rednote are supported");
             }
         } catch (URISyntaxException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "链接格式不正确");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The link format is incorrect");
         }
     }
 
@@ -113,14 +113,14 @@ public class XhsImageExtractorService {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             int status = response.statusCode();
             if (status >= 400) {
-                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "抓取失败，目标页面返回状态码 " + status);
+                throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Failed to capture. The target page returns a status code " + status);
             }
             return new FetchResult(response.uri().toString(), response.body());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "抓取失败，请稍后重试");
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "Failed to capture. Please try again later");
         }
     }
 
