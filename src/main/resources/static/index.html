@@ -23,7 +23,8 @@
                     <button class="btn btn-primary btn-sm" id="login-btn">Login</button>
                 </div>
                 <div id="user-info" class="hidden">
-                    <span class="user-name" id="user-display"></span>
+                    <img id="user-avatar-img" class="user-avatar-small" src="" alt="">
+                    <span class="user-name clickable" id="user-display" title="View profile"></span>
                     <button class="btn-link sm" id="logout-btn">Logout</button>
                 </div>
                 <button class="notif-bell hidden" id="notif-bell" title="Notifications">
@@ -477,23 +478,58 @@
                 </nav>
                 <button class="modal-close" id="auth-close">&times;</button>
             </div>
-            <form id="auth-login-form" class="modal-body" autocomplete="off">
+            <!-- Login Form -->
+            <div id="auth-login-form" class="modal-body">
                 <div id="login-memory-wrap" class="hidden">
                     <p class="label" style="margin-bottom:6px">Quick Login</p>
                     <div id="login-memory-list" class="login-memory-list"></div>
                 </div>
-                <div class="form-group">
-                    <label class="label">Username</label>
-                    <input class="input" type="text" id="login-user" placeholder="Enter username" required>
+                <div class="pill-group sub-nav" id="login-mode-nav" style="margin-bottom:16px;width:100%;display:flex">
+                    <button class="pill active" data-login-mode="password" style="flex:1;text-align:center">Password</button>
+                    <button class="pill" data-login-mode="email" style="flex:1;text-align:center">Email Code</button>
                 </div>
-                <div class="form-group">
-                    <label class="label">Password</label>
-                    <input class="input" type="password" id="login-pass" placeholder="Enter password" required>
-                </div>
-                <button type="submit" class="btn btn-primary full">Sign In</button>
+                <!-- Password login -->
+                <form id="login-password-form" autocomplete="off">
+                    <div class="form-group">
+                        <label class="label">Username</label>
+                        <input class="input" type="text" id="login-user" placeholder="Enter username" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="label">Password</label>
+                        <input class="input" type="password" id="login-pass" placeholder="Enter password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary full">Sign In</button>
+                </form>
+                <!-- Email login -->
+                <form id="login-email-form" class="hidden" autocomplete="off">
+                    <div class="form-group">
+                        <label class="label">Email</label>
+                        <input class="input" type="email" id="login-email" placeholder="Enter email" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="label">Verification Code</label>
+                        <div class="row gap">
+                            <input class="input" type="text" id="login-email-code" placeholder="6-digit code" maxlength="6" required style="flex:1">
+                            <button type="button" class="btn btn-primary btn-sm" id="login-send-code-btn">Send Code</button>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary full">Sign In</button>
+                </form>
                 <div id="login-error" class="error-card hidden mt"></div>
-            </form>
+            </div>
+            <!-- Register Form (email-based) -->
             <form id="auth-reg-form" class="modal-body hidden" autocomplete="off">
+                <div class="form-group">
+                    <label class="label">Email</label>
+                    <input class="input" type="email" id="reg-email" placeholder="Enter email" required>
+                </div>
+                <div class="form-group">
+                    <label class="label">Verification Code</label>
+                    <div class="row gap">
+                        <input class="input" type="text" id="reg-code" placeholder="6-digit code" maxlength="6" required style="flex:1">
+                        <button type="button" class="btn btn-primary btn-sm" id="reg-send-code-btn">Send Code</button>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label class="label">Username</label>
                     <input class="input" type="text" id="reg-user" placeholder="3-50 characters" required>
@@ -506,6 +542,90 @@
                 <div id="reg-error" class="error-card hidden mt"></div>
                 <div id="reg-ok" class="success-card hidden mt"></div>
             </form>
+        </div>
+    </div>
+
+    <!-- Email Binding Modal (for old users) -->
+    <div id="bind-email-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <strong>Bind Email</strong>
+            </div>
+            <div class="modal-body">
+                <div class="success-card" style="margin-bottom:16px">
+                    <p>Due to a version upgrade, you need to bind an email address to continue using ByteFerry.</p>
+                </div>
+                <div class="form-group">
+                    <label class="label">Email</label>
+                    <input class="input" type="email" id="bind-email" placeholder="Enter your email">
+                </div>
+                <div class="form-group">
+                    <label class="label">Verification Code</label>
+                    <div class="row gap">
+                        <input class="input" type="text" id="bind-code" placeholder="6-digit code" maxlength="6" style="flex:1">
+                        <button type="button" class="btn btn-primary btn-sm" id="bind-send-code-btn">Send Code</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary full" id="bind-confirm-btn">Bind Email</button>
+                <div id="bind-error" class="error-card hidden mt"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Profile Modal -->
+    <div id="profile-modal" class="modal-overlay hidden">
+        <div class="modal-card" style="width:480px">
+            <div class="modal-header">
+                <strong>My Profile</strong>
+                <button class="modal-close" id="profile-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align:center;margin-bottom:20px">
+                    <div class="profile-avatar-wrap" id="profile-avatar-wrap">
+                        <img id="profile-avatar" class="profile-avatar" src="" alt="avatar">
+                        <div class="profile-avatar-overlay" id="profile-avatar-overlay">Change</div>
+                        <input type="file" id="avatar-input" accept="image/jpeg,image/png,image/webp" hidden>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="label">Username</label>
+                    <input class="input" type="text" id="profile-username" placeholder="Username">
+                </div>
+                <div class="form-group">
+                    <label class="label">Gender</label>
+                    <div class="pill-group" id="gender-nav" style="width:100%;display:flex">
+                        <button type="button" class="pill" data-gender="MALE" style="flex:1;text-align:center">Male</button>
+                        <button type="button" class="pill" data-gender="FEMALE" style="flex:1;text-align:center">Female</button>
+                        <button type="button" class="pill" data-gender="OTHER" style="flex:1;text-align:center">Other</button>
+                        <button type="button" class="pill" data-gender="UNKNOWN" style="flex:1;text-align:center">Unknown</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="label">Email</label>
+                    <div class="row gap">
+                        <input class="input" type="email" id="profile-email" placeholder="Email" disabled style="flex:1">
+                        <button type="button" class="btn btn-primary btn-sm" id="profile-change-email-btn">Change</button>
+                    </div>
+                </div>
+                <!-- Change email section (hidden by default) -->
+                <div id="profile-email-change" class="hidden" style="margin-top:8px">
+                    <div class="form-group">
+                        <label class="label">New Email</label>
+                        <input class="input" type="email" id="profile-new-email" placeholder="Enter new email">
+                    </div>
+                    <div class="form-group">
+                        <label class="label">Verification Code</label>
+                        <div class="row gap">
+                            <input class="input" type="text" id="profile-email-code" placeholder="6-digit code" maxlength="6" style="flex:1">
+                            <button type="button" class="btn btn-primary btn-sm" id="profile-email-send-code">Send Code</button>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm" id="profile-email-confirm">Confirm Change</button>
+                </div>
+                <button class="btn btn-primary full" id="profile-save-btn" style="margin-top:16px">Save Changes</button>
+                <div id="profile-error" class="error-card hidden mt"></div>
+                <div id="profile-ok" class="success-card hidden mt"></div>
+            </div>
         </div>
     </div>
 

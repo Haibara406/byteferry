@@ -108,9 +108,46 @@ document.addEventListener('DOMContentLoaded', () => {
     $('auth-close').addEventListener('click', () => show('auth-modal', false));
     $('auth-modal').addEventListener('click', e => { if (e.target === $('auth-modal')) show('auth-modal', false); });
     bindTabs('auth-nav', { 'auth-login-form': 'auth-login-form', 'auth-reg-form': 'auth-reg-form' });
-    $('auth-login-form').addEventListener('submit', loginSubmit);
+    $('login-password-form').addEventListener('submit', loginSubmit);
+    $('login-email-form').addEventListener('submit', loginEmailSubmit);
     $('auth-reg-form').addEventListener('submit', registerSubmit);
     $('logout-btn').addEventListener('click', logout);
+
+    // Login mode toggle (Password / Email Code)
+    document.querySelectorAll('#login-mode-nav .pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#login-mode-nav .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            show('login-password-form', btn.dataset.loginMode === 'password');
+            show('login-email-form', btn.dataset.loginMode === 'email');
+        });
+    });
+
+    // Send code buttons
+    $('login-send-code-btn').addEventListener('click', () => sendVerifyCode($('login-email').value.trim(), $('login-send-code-btn')));
+    $('reg-send-code-btn').addEventListener('click', () => sendVerifyCode($('reg-email').value.trim(), $('reg-send-code-btn')));
+    $('bind-send-code-btn').addEventListener('click', () => sendVerifyCode($('bind-email').value.trim(), $('bind-send-code-btn')));
+    $('bind-confirm-btn').addEventListener('click', bindEmailSubmit);
+
+    // Profile
+    $('user-display').addEventListener('click', openProfile);
+    $('profile-close').addEventListener('click', () => show('profile-modal', false));
+    $('profile-modal').addEventListener('click', e => { if (e.target === $('profile-modal')) show('profile-modal', false); });
+    $('profile-save-btn').addEventListener('click', saveProfile);
+    $('profile-avatar-wrap').addEventListener('click', () => $('avatar-input').click());
+    $('avatar-input').addEventListener('change', e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]); e.target.value = ''; });
+    document.querySelectorAll('#gender-nav .pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#gender-nav .pill').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            profileGender = btn.dataset.gender;
+        });
+    });
+    $('profile-change-email-btn').addEventListener('click', () => show('profile-email-change', !$('profile-email-change').classList.contains('hidden') ? false : true));
+    $('profile-email-send-code').addEventListener('click', () => sendVerifyCode($('profile-new-email').value.trim(), $('profile-email-send-code')));
+    $('profile-email-confirm').addEventListener('click', changeEmail);
+
+    // Login memory
     const memoryList = $('login-memory-list');
     if (memoryList) {
         memoryList.addEventListener('click', e => {
@@ -801,7 +838,8 @@ async function restoreAuth() {
         try {
             const r = await fetch('/api/auth/me', { headers: authHeader() });
             if (!r.ok) throw new Error('expired');
-            onLogin(getUser());
+            const d = await r.json();
+            onLogin(d.username, d);
         } catch (e) {
             localStorage.removeItem('bf_token');
             localStorage.removeItem('bf_user');
@@ -811,7 +849,7 @@ async function restoreAuth() {
     renderLoginMemory();
 }
 
-function onLogin(username) {
+function onLogin(username, userData) {
     show('user-area', false);
     show('user-info', true);
     $('user-display').textContent = username;
@@ -819,10 +857,22 @@ function onLogin(username) {
     show('nav-friend', true);
     show('notif-bell', true);
     connectFriendWS();
-    // Fetch userId for friend session sender identification
-    fetch('/api/auth/me', { headers: authHeader() }).then(r => r.ok ? r.json() : null).then(d => {
-        if (d && d.id) localStorage.setItem('bf_uid', d.id);
-    }).catch(() => {});
+
+    // Fetch full user data if not provided
+    if (!userData) {
+        fetch('/api/auth/me', { headers: authHeader() }).then(r => r.ok ? r.json() : null).then(d => {
+            if (d) {
+                localStorage.setItem('bf_uid', d.id);
+                if (d.avatar) $('user-avatar-img').src = d.avatar;
+                if (!d.emailBound) showBindEmailModal();
+            }
+        }).catch(() => {});
+    } else {
+        localStorage.setItem('bf_uid', userData.id);
+        if (userData.avatar) $('user-avatar-img').src = userData.avatar;
+        if (!userData.emailBound) showBindEmailModal();
+    }
+
     rememberLogin(username, getToken());
     renderLoginMemory();
 }
@@ -836,12 +886,12 @@ function logout() {
     show('nav-space', false);
     show('nav-friend', false);
     show('notif-bell', false);
+    $('user-avatar-img').src = '';
     stopSpacePoll();
     disconnectSpaceWS();
     disconnectFriendWS();
     notifications = [];
     renderNotifications();
-    // If on space/friend tab, switch to quick
     if (!$('view-space').classList.contains('hidden') || !$('view-friend').classList.contains('hidden')) {
         document.querySelector('#mode-nav .pill[data-mode="quick"]').click();
     }
@@ -857,7 +907,8 @@ async function quickLoginFromMemory(username) {
     try {
         const r = await fetch('/api/auth/me', { headers: authHeader() });
         if (!r.ok) throw new Error('Session expired');
-        onLogin(item.username);
+        const d = await r.json();
+        onLogin(item.username, d);
         show('auth-modal', false);
         showToast('Welcome back, ' + item.username, 'success');
     } catch (e) {
@@ -877,6 +928,33 @@ async function quickLoginFromMemory(username) {
     }
 }
 
+/* -- Send verification code helper -- */
+async function sendVerifyCode(email, btn) {
+    if (!email) { showToast('Please enter an email', 'error'); return false; }
+    btn.disabled = true;
+    try {
+        const r = await fetch('/api/auth/send-code', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Failed to send code');
+        showToast('Verification code sent', 'success');
+        let cd = 60;
+        const orig = btn.textContent;
+        const timer = setInterval(() => {
+            cd--;
+            btn.textContent = cd + 's';
+            if (cd <= 0) { clearInterval(timer); btn.textContent = orig; btn.disabled = false; }
+        }, 1000);
+        return true;
+    } catch (err) {
+        btn.disabled = false;
+        showToast(err.message, 'error');
+        return false;
+    }
+}
+
+/* -- Password login -- */
 async function loginSubmit(e) {
     e.preventDefault();
     show('login-error', false);
@@ -892,7 +970,7 @@ async function loginSubmit(e) {
         localStorage.setItem('bf_token', d.token);
         localStorage.setItem('bf_user', d.username);
         rememberLogin(d.username, d.token);
-        onLogin(d.username);
+        onLogin(d.username, { emailBound: d.emailBound });
         show('auth-modal', false);
         showToast('Welcome, ' + d.username);
     } catch (err) {
@@ -901,15 +979,46 @@ async function loginSubmit(e) {
     }
 }
 
+/* -- Email login -- */
+async function loginEmailSubmit(e) {
+    e.preventDefault();
+    show('login-error', false);
+    const email = $('login-email').value.trim();
+    const code = $('login-email-code').value.trim();
+    try {
+        const r = await fetch('/api/auth/login/email', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, code })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Login failed');
+        const d = await r.json();
+        localStorage.setItem('bf_token', d.token);
+        // Need to fetch username
+        const me = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + d.token } });
+        const meData = await me.json();
+        localStorage.setItem('bf_user', meData.username);
+        rememberLogin(meData.username, d.token);
+        onLogin(meData.username, meData);
+        show('auth-modal', false);
+        showToast('Welcome, ' + meData.username);
+    } catch (err) {
+        show('login-error', true);
+        $('login-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+/* -- Register (email-based) -- */
 async function registerSubmit(e) {
     e.preventDefault();
     show('reg-error', false); show('reg-ok', false);
+    const email = $('reg-email').value.trim();
+    const code = $('reg-code').value.trim();
     const user = $('reg-user').value.trim();
     const pass = $('reg-pass').value;
     try {
         const r = await fetch('/api/auth/register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: user, password: pass })
+            body: JSON.stringify({ email, code, username: user, password: pass })
         });
         if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Registration failed');
         show('reg-ok', true);
@@ -918,11 +1027,114 @@ async function registerSubmit(e) {
         if (loginPill) loginPill.click();
         $('login-user').value = user;
         $('login-pass').value = '';
-        $('reg-user').value = '';
-        $('reg-pass').value = '';
+        $('reg-email').value = ''; $('reg-code').value = ''; $('reg-user').value = ''; $('reg-pass').value = '';
     } catch (err) {
         show('reg-error', true);
         $('reg-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+/* -- Email binding (old users) -- */
+function showBindEmailModal() {
+    show('bind-email-modal', true);
+}
+
+async function bindEmailSubmit() {
+    show('bind-error', false);
+    const email = $('bind-email').value.trim();
+    const code = $('bind-code').value.trim();
+    if (!email || !code) { show('bind-error', true); $('bind-error').innerHTML = '<p>Email and code are required</p>'; return; }
+    try {
+        const r = await fetch('/api/auth/bind-email', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ email, code })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Binding failed');
+        show('bind-email-modal', false);
+        showToast('Email bound successfully! Please login again.', 'success');
+        logout();
+        show('auth-modal', true);
+    } catch (err) {
+        show('bind-error', true);
+        $('bind-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+/* ==================== Profile ==================== */
+let profileGender = 'UNKNOWN';
+
+async function openProfile() {
+    show('profile-error', false); show('profile-ok', false); show('profile-email-change', false);
+    try {
+        const r = await fetch('/api/user/profile', { headers: authHeader() });
+        if (!r.ok) throw new Error('Failed to load profile');
+        const d = await r.json();
+        $('profile-avatar').src = d.avatar || '';
+        $('profile-username').value = d.username || '';
+        $('profile-email').value = d.email || '';
+        profileGender = d.gender || 'UNKNOWN';
+        document.querySelectorAll('#gender-nav .pill').forEach(p => {
+            p.classList.toggle('active', p.dataset.gender === profileGender);
+        });
+        show('profile-modal', true);
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function saveProfile() {
+    show('profile-error', false); show('profile-ok', false);
+    const username = $('profile-username').value.trim();
+    try {
+        const r = await fetch('/api/user/profile', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ username, gender: profileGender })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Failed to save');
+        const d = await r.json();
+        show('profile-ok', true);
+        $('profile-ok').innerHTML = '<p>Profile saved</p>';
+        // Update header
+        localStorage.setItem('bf_user', d.username);
+        $('user-display').textContent = d.username;
+    } catch (err) {
+        show('profile-error', true);
+        $('profile-error').innerHTML = '<p>' + esc(err.message) + '</p>';
+    }
+}
+
+async function uploadAvatar(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const r = await fetch('/api/user/avatar', { method: 'POST', headers: authHeader(), body: fd });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Upload failed');
+        const d = await r.json();
+        $('profile-avatar').src = d.avatar;
+        $('user-avatar-img').src = d.avatar;
+        showToast('Avatar updated', 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
+    }
+}
+
+async function changeEmail() {
+    show('profile-error', false);
+    const newEmail = $('profile-new-email').value.trim();
+    const code = $('profile-email-code').value.trim();
+    if (!newEmail || !code) { showToast('Email and code are required', 'error'); return; }
+    try {
+        const r = await fetch('/api/user/email/change', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+            body: JSON.stringify({ email: newEmail, code })
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message || 'Failed');
+        $('profile-email').value = newEmail;
+        show('profile-email-change', false);
+        $('profile-new-email').value = ''; $('profile-email-code').value = '';
+        showToast('Email changed', 'success');
+    } catch (err) {
+        showToast(err.message, 'error');
     }
 }
 

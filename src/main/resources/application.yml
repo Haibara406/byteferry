@@ -35,6 +35,24 @@ server:
   error:
     include-message: always
 
+# MinIO
+minio:
+  endpoint: http://154.94.235.178:9000
+  url: https://minio.haikari.top
+  accessKey: haibara
+  secretKey: "Ww249260523.."
+  bucketName: byteferry
+
+# Mail (SMTP)
+spring.mail:
+  host: smtp.qq.com
+  port: 587
+  username: ${MAIL_USERNAME:haibaraiii@foxmail.com}
+  password: ${MAIL_PASSWORD:uoptzqxynsjvbijj}
+  properties:
+    mail.smtp.auth: true
+    mail.smtp.starttls.enable: true
+
 # ByteFerry custom config
 byteferry:
   storage:
