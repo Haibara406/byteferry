@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Moments - ByteFerry</title>
+    <link rel="icon" type="image/jpeg" href="/favicon.jpeg">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <div class="container header-inner">
+            <h1 class="logo"><span class="accent">Byte</span>Ferry</h1>
+            <div class="header-right">
+                <button class="btn-link" id="back-home-btn">&larr; Back to Home</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="view" id="view-share">
+            <section class="panel fade-in">
+                <div class="card">
+                    <h2 class="section-title">Shared Moments</h2>
+                    <p class="muted" id="share-info">Loading moments...</p>
+                </div>
+
+                <div id="moments-list" class="mt"></div>
+
+                <div class="text-center mt">
+                    <button class="btn btn-secondary" id="load-more-btn">Load More</button>
+                </div>
+
+                <div id="error-message" class="error-card hidden mt"></div>
+            </section>
+        </div>
+    </main>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        const API_BASE = '/api';
+        const TOKEN_KEY = 'bf_token';
+        let currentPage = 0;
+        let shareCode = '';
+
+        function getToken() {
+            return localStorage.getItem(TOKEN_KEY);
+        }
+
+        function showToast(message, type = 'normal') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function createMomentCard(moment) {
+            const card = document.createElement('div');
+            card.className = 'card mt';
+
+            const date = new Date(moment.createdAt).toLocaleString();
+            const visibilityBadge = `<span class="badge badge-${moment.visibility.toLowerCase()}">${moment.visibility}</span>`;
+
+            let imagesHtml = '';
+            if (moment.images && moment.images.length > 0) {
+                imagesHtml = '<div class="moment-images">';
+                moment.images.forEach(img => {
+                    if (img.livePhoto) {
+                        imagesHtml += `
+                            <div class="moment-image-item">
+                                <img src="${img.imageUrl}" alt="moment image">
+                                <span class="live-badge">LIVE</span>
+                            </div>
+                        `;
+                    } else {
+                        imagesHtml += `<img src="${img.imageUrl}" alt="moment image" class="moment-image-item">`;
+                    }
+                });
+                imagesHtml += '</div>';
+            }
+
+            card.innerHTML = `
+                <div class="moment-header">
+                    <div>
+                        <strong>User ID: ${moment.userId}</strong>
+                        <small class="muted"> • ${date}</small>
+                    </div>
+                    ${visibilityBadge}
+                </div>
+                <div class="moment-content">
+                    ${moment.textContent ? `<p>${escapeHtml(moment.textContent)}</p>` : ''}
+                    ${moment.htmlContent ? `<div class="moment-html">${moment.htmlContent}</div>` : ''}
+                    ${imagesHtml}
+                </div>
+            `;
+
+            return card;
+        }
+
+        async function loadMoments(page = 0) {
+            const token = getToken();
+            if (!token) {
+                document.getElementById('error-message').textContent = 'Please login to view shared moments';
+                document.getElementById('error-message').classList.remove('hidden');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/moment/share/${shareCode}?page=${page}&size=10`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load moments');
+                }
+
+                const data = await response.json();
+                const list = document.getElementById('moments-list');
+
+                if (page === 0) {
+                    list.innerHTML = '';
+                    document.getElementById('share-info').textContent = `Viewing shared moments`;
+                }
+
+                if (data.content.length === 0 && page === 0) {
+                    list.innerHTML = '<div class="card"><p class="muted">No moments available</p></div>';
+                    document.getElementById('load-more-btn').style.display = 'none';
+                    return;
+                }
+
+                data.content.forEach(moment => {
+                    list.appendChild(createMomentCard(moment));
+                });
+
+                currentPage = page;
+                document.getElementById('load-more-btn').style.display = data.last ? 'none' : 'block';
+            } catch (error) {
+                document.getElementById('error-message').textContent = error.message;
+                document.getElementById('error-message').classList.remove('hidden');
+            }
+        }
+
+        document.getElementById('load-more-btn').addEventListener('click', () => {
+            loadMoments(currentPage + 1);
+        });
+
+        document.getElementById('back-home-btn').addEventListener('click', () => {
+            window.location.href = '/';
+        });
+
+        // Initialize
+        const urlParams = new URLSearchParams(window.location.search);
+        shareCode = urlParams.get('code');
+
+        if (!shareCode) {
+            document.getElementById('error-message').textContent = 'Invalid share link';
+            document.getElementById('error-message').classList.remove('hidden');
+        } else if (!getToken()) {
+            document.getElementById('error-message').textContent = 'Please login first';
+            document.getElementById('error-message').classList.remove('hidden');
+            setTimeout(() => {
+                window.location.href = '/?redirect=' + encodeURIComponent(window.location.href);
+            }, 2000);
+        } else {
+            loadMoments(0);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+package com.byteferry.byteferry.model.entity;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
+@Table(name = "moment_images")
+public class MomentImage {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "moment_id", nullable = false)
+    private Long momentId;
+
+    @Column(name = "image_url", nullable = false, length = 500)
+    private String imageUrl;
+
+    @Column(name = "video_url", length = 500)
+    private String videoUrl;
+
+    @Column(name = "is_live_photo", nullable = false)
+    @Builder.Default
+    private boolean isLivePhoto = false;
+
+    @Column(name = "sort_order")
+    @Builder.Default
+    private int sortOrder = 0;
+}

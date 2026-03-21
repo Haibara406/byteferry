@@ -23,6 +23,9 @@ public class FileUploadUtils {
     @Value("${minio.bucketName}")
     private String bucketName;
 
+    @Value("${minio.publicUrl:${minio.endpoint}}")
+    private String publicUrl;
+
     @Value("${minio.url}")
     private String url;
 
@@ -45,7 +48,7 @@ public class FileUploadUtils {
                     .build();
             client.putObject(args);
 
-            return url + "/" + bucketName + "/" + objectName;
+            return publicUrl + "/" + bucketName + "/" + objectName;
         } catch (Exception e) {
             log.error("文件上传失败", e);
             throw new RuntimeException("文件上传失败: " + e.getMessage());
@@ -70,7 +73,7 @@ public class FileUploadUtils {
                     .build();
             client.putObject(args);
 
-            return url + "/" + bucketName + "/" + objectName;
+            return publicUrl + "/" + bucketName + "/" + objectName;
         } catch (Exception e) {
             log.error("文件上传失败", e);
             throw new RuntimeException("文件上传失败: " + e.getMessage());
@@ -107,9 +110,17 @@ public class FileUploadUtils {
     public boolean deleteByUrl(String fileUrl) {
         if (fileUrl == null || fileUrl.isBlank()) return false;
         try {
-            // URL format: https://minio.haikari.top/byteferry/moment/image/xxx.jpg
-            String prefix = url + "/" + bucketName + "/";
-            if (!fileUrl.startsWith(prefix)) return false;
+            // URL format: http://154.94.235.178:9000/byteferry/moment/image/xxx.jpg
+            String prefix = publicUrl + "/" + bucketName + "/";
+            if (!fileUrl.startsWith(prefix)) {
+                // Try old URL format for backward compatibility
+                String oldPrefix = url + "/" + bucketName + "/";
+                if (fileUrl.startsWith(oldPrefix)) {
+                    prefix = oldPrefix;
+                } else {
+                    return false;
+                }
+            }
             String objectName = fileUrl.substring(prefix.length());
             client.removeObject(
                     RemoveObjectArgs.builder()
@@ -121,6 +132,42 @@ public class FileUploadUtils {
             return true;
         } catch (Exception e) {
             log.error("通过 URL 删除文件失败: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 通过完整 URL 批量删除文件
+     */
+    public boolean deleteByUrls(List<String> fileUrls) {
+        if (fileUrls == null || fileUrls.isEmpty()) return false;
+        try {
+            String prefix = publicUrl + "/" + bucketName + "/";
+            String oldPrefix = url + "/" + bucketName + "/";
+            List<DeleteObject> deleteObjects = fileUrls.stream()
+                    .filter(fileUrl -> fileUrl != null && (fileUrl.startsWith(prefix) || fileUrl.startsWith(oldPrefix)))
+                    .map(fileUrl -> {
+                        String actualPrefix = fileUrl.startsWith(prefix) ? prefix : oldPrefix;
+                        return new DeleteObject(fileUrl.substring(actualPrefix.length()));
+                    })
+                    .toList();
+
+            if (deleteObjects.isEmpty()) return false;
+
+            RemoveObjectsArgs args = RemoveObjectsArgs.builder()
+                    .bucket(bucketName)
+                    .objects(deleteObjects)
+                    .build();
+            Iterable<io.minio.Result<DeleteError>> results = client.removeObjects(args);
+            for (io.minio.Result<DeleteError> result : results) {
+                DeleteError error = result.get();
+                log.error("文件 {} 删除错误: {}", error.objectName(), error.message());
+                return false;
+            }
+            log.info("批量删除 {} 个文件成功", deleteObjects.size());
+            return true;
+        } catch (Exception e) {
+            log.error("通过 URL 批量删除文件失败", e);
             return false;
         }
     }

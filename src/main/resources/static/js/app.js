@@ -24,10 +24,12 @@ document.addEventListener('DOMContentLoaded', () => {
             show('view-xhs', btn.dataset.mode === 'xhs');
             show('view-space', btn.dataset.mode === 'space');
             show('view-friend', btn.dataset.mode === 'friend');
+            show('view-moment', btn.dataset.mode === 'moment');
             if (btn.dataset.mode !== 'session') stopRecvPoll();
             if (btn.dataset.mode === 'space') { refreshSpace(); connectSpaceWS(); }
             else { stopSpacePoll(); disconnectSpaceWS(); }
             if (btn.dataset.mode === 'friend') { refreshFriendList(); refreshRequests(); }
+            if (btn.dataset.mode === 'moment' && typeof initMoment === 'function') { initMoment(); }
             currentMainTab = btn.dataset.mode;
             currentSubTab = null;
             saveHash();
@@ -39,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Session sub-tabs
     bindTabs('sess-nav', { 's-send': 's-send', 's-recv': 's-recv' });
+
+    // Moment sub-tabs
+    bindTabs('moment-nav', { 'moment-timeline': 'moment-timeline', 'moment-create': 'moment-create', 'moment-my': 'moment-my' });
 
     // Type chips
     document.querySelectorAll('#type-bar .type-chip').forEach(btn => {
@@ -300,10 +305,10 @@ function restoreFromHash() {
     const parts = hash.split('/');
     const mainTab = parts[0];
     const subTab = parts[1] || null;
-    const validMain = ['quick', 'session', 'xhs', 'space', 'friend'];
+    const validMain = ['quick', 'session', 'xhs', 'space', 'friend', 'moment'];
     if (!validMain.includes(mainTab)) return;
-    // For space/friend, only restore if logged in
-    if ((mainTab === 'space' || mainTab === 'friend') && !getToken()) return;
+    // For space/friend/moment, only restore if logged in
+    if ((mainTab === 'space' || mainTab === 'friend' || mainTab === 'moment') && !getToken()) return;
     // Click the main tab pill
     const mainPill = document.querySelector('#mode-nav .pill[data-mode="' + mainTab + '"]');
     if (mainPill) mainPill.click();
@@ -876,6 +881,7 @@ function onLogin(username, userData) {
     $('user-display').textContent = username;
     show('nav-space', true);
     show('nav-friend', true);
+    show('nav-moment', true);
     show('notif-bell', true);
     connectFriendWS();
 
@@ -906,6 +912,7 @@ function logout() {
     show('user-info', false);
     show('nav-space', false);
     show('nav-friend', false);
+    show('nav-moment', false);
     show('notif-bell', false);
     $('user-avatar-img').src = '';
     stopSpacePoll();
@@ -913,7 +920,7 @@ function logout() {
     disconnectFriendWS();
     notifications = [];
     renderNotifications();
-    if (!$('view-space').classList.contains('hidden') || !$('view-friend').classList.contains('hidden')) {
+    if (!$('view-space').classList.contains('hidden') || !$('view-friend').classList.contains('hidden') || !$('view-moment').classList.contains('hidden')) {
         document.querySelector('#mode-nav .pill[data-mode="quick"]').click();
     }
     showToast('Logged out');

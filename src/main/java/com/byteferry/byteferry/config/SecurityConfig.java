@@ -29,7 +29,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/session/**").permitAll()
                 .requestMatchers("/api/xhs/**").permitAll()
                 .requestMatchers("/ws/**").permitAll()
-                .requestMatchers("/", "/index.html", "/profile.html", "/css/**", "/js/**", "/images/**", "/favicon.ico", "/favicon.jpeg").permitAll()
+                .requestMatchers("/", "/index.html", "/profile.html", "/moment-share.html", "/css/**", "/js/**", "/images/**", "/favicon.ico", "/favicon.jpeg").permitAll()
                 .requestMatchers("/api/friend/**").authenticated()
                 .requestMatchers("/api/space/**").authenticated()
                 .requestMatchers("/api/user/**").authenticated()
