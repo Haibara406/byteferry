@@ -1,6 +1,6 @@
 // ==================== Constants ====================
 const API_BASE = '/api';
-const TOKEN_KEY = 'byteferry_token';
+const TOKEN_KEY = 'bf_token';
 
 // ==================== DOM Elements ====================
 const backHomeBtn = document.getElementById('back-home-btn');
