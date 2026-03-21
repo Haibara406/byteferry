@@ -9,13 +9,22 @@ spring:
       port: 6379
       password: "Ww249260523.."
       database: 2
-      timeout: 10000
+      timeout: 5000
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 2
 
   # MySQL
   datasource:
     url: jdbc:mysql://8.156.75.132:3306/byteferry?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: "Ww249260523.."
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 20000
   jpa:
     hibernate:
       ddl-auto: update

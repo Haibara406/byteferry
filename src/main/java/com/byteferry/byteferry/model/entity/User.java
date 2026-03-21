@@ -31,7 +31,7 @@ public class User {
 
     @Column(length = 500)
     @Builder.Default
-    private String avatar = "https://minio.haikari.top/byteferry/default/default-avatar.png";
+    private String avatar = "/images/default-avatar.jpg";
 
     @Enumerated(EnumType.STRING)
     @Column(length = 10)

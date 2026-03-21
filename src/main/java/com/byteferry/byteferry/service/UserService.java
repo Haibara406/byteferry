@@ -16,7 +16,7 @@ public class UserService {
     private final FileUploadUtils fileUploadUtils;
     private final VerificationCodeService verificationCodeService;
 
-    private static final String DEFAULT_AVATAR = "https://minio.haikari.top/byteferry/default/default-avatar.png";
+    private static final String DEFAULT_AVATAR = "/images/default-avatar.jpg";
 
     public User getProfile(Long userId) {
         return userRepository.findById(userId)

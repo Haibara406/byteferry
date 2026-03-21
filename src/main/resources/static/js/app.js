@@ -129,23 +129,44 @@ document.addEventListener('DOMContentLoaded', () => {
     $('bind-send-code-btn').addEventListener('click', () => sendVerifyCode($('bind-email').value.trim(), $('bind-send-code-btn')));
     $('bind-confirm-btn').addEventListener('click', bindEmailSubmit);
 
-    // Profile
+    // Profile - now redirects to profile.html
     $('user-display').addEventListener('click', openProfile);
-    $('profile-close').addEventListener('click', () => show('profile-modal', false));
-    $('profile-modal').addEventListener('click', e => { if (e.target === $('profile-modal')) show('profile-modal', false); });
-    $('profile-save-btn').addEventListener('click', saveProfile);
-    $('profile-avatar-wrap').addEventListener('click', () => $('avatar-input').click());
-    $('avatar-input').addEventListener('change', e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]); e.target.value = ''; });
-    document.querySelectorAll('#gender-nav .pill').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('#gender-nav .pill').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            profileGender = btn.dataset.gender;
+
+    // Profile modal event listeners (kept for backward compatibility, but modal is not used)
+    if ($('profile-close')) {
+        $('profile-close').addEventListener('click', () => show('profile-modal', false));
+    }
+    if ($('profile-modal')) {
+        $('profile-modal').addEventListener('click', e => { if (e.target === $('profile-modal')) show('profile-modal', false); });
+    }
+    if ($('profile-save-btn')) {
+        $('profile-save-btn').addEventListener('click', saveProfile);
+    }
+    if ($('profile-avatar-wrap')) {
+        $('profile-avatar-wrap').addEventListener('click', () => $('avatar-input').click());
+    }
+    if ($('avatar-input')) {
+        $('avatar-input').addEventListener('change', e => { if (e.target.files[0]) uploadAvatar(e.target.files[0]); e.target.value = ''; });
+    }
+    const genderNavBtns = document.querySelectorAll('#gender-nav .pill');
+    if (genderNavBtns.length > 0) {
+        genderNavBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#gender-nav .pill').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                profileGender = btn.dataset.gender;
+            });
         });
-    });
-    $('profile-change-email-btn').addEventListener('click', () => show('profile-email-change', !$('profile-email-change').classList.contains('hidden') ? false : true));
-    $('profile-email-send-code').addEventListener('click', () => sendVerifyCode($('profile-new-email').value.trim(), $('profile-email-send-code')));
-    $('profile-email-confirm').addEventListener('click', changeEmail);
+    }
+    if ($('profile-change-email-btn')) {
+        $('profile-change-email-btn').addEventListener('click', () => show('profile-email-change', !$('profile-email-change').classList.contains('hidden') ? false : true));
+    }
+    if ($('profile-email-send-code')) {
+        $('profile-email-send-code').addEventListener('click', () => sendVerifyCode($('profile-new-email').value.trim(), $('profile-email-send-code')));
+    }
+    if ($('profile-email-confirm')) {
+        $('profile-email-confirm').addEventListener('click', changeEmail);
+    }
 
     // Login memory
     const memoryList = $('login-memory-list');
@@ -1064,22 +1085,7 @@ async function bindEmailSubmit() {
 let profileGender = 'UNKNOWN';
 
 async function openProfile() {
-    show('profile-error', false); show('profile-ok', false); show('profile-email-change', false);
-    try {
-        const r = await fetch('/api/user/profile', { headers: authHeader() });
-        if (!r.ok) throw new Error('Failed to load profile');
-        const d = await r.json();
-        $('profile-avatar').src = d.avatar || '';
-        $('profile-username').value = d.username || '';
-        $('profile-email').value = d.email || '';
-        profileGender = d.gender || 'UNKNOWN';
-        document.querySelectorAll('#gender-nav .pill').forEach(p => {
-            p.classList.toggle('active', p.dataset.gender === profileGender);
-        });
-        show('profile-modal', true);
-    } catch (err) {
-        showToast(err.message, 'error');
-    }
+    window.location.href = '/profile.html';
 }
 
 async function saveProfile() {
