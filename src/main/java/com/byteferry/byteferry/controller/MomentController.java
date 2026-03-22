@@ -31,8 +31,7 @@ public class MomentController {
     public ResponseEntity<Moment> createMoment(
             Authentication auth,
             @RequestParam(required = false) String textContent,
-            @RequestParam(required = false) String htmlContent,
-            @RequestParam(required = false) String templateId,
+            @RequestParam(defaultValue = "false") boolean cardMode,
             @RequestParam(defaultValue = "PUBLIC") String visibility,
             @RequestParam(required = false) String visibleUserIds,
             @RequestParam(required = false) MultipartFile[] images,
@@ -52,8 +51,7 @@ public class MomentController {
         Moment moment = momentService.createMoment(
                 userId,
                 textContent,
-                htmlContent,
-                templateId,
+                cardMode,
                 Visibility.valueOf(visibility.toUpperCase()),
                 userIds,
                 images,
@@ -113,7 +111,6 @@ public class MomentController {
             @PathVariable Long id,
             Authentication auth,
             @RequestParam(required = false) String textContent,
-            @RequestParam(required = false) String htmlContent,
             @RequestParam(required = false) String visibility,
             @RequestParam(required = false) String visibleUserIds) {
 
@@ -129,7 +126,7 @@ public class MomentController {
 
         Visibility vis = visibility != null ? Visibility.valueOf(visibility.toUpperCase()) : null;
 
-        Moment moment = momentService.updateMoment(id, userId, textContent, htmlContent, vis, userIds);
+        Moment moment = momentService.updateMoment(id, userId, textContent, vis, userIds);
         return ResponseEntity.ok(moment);
     }
 
@@ -138,17 +135,6 @@ public class MomentController {
         Long userId = (Long) auth.getPrincipal();
         momentService.deleteMoment(id, userId);
         return ResponseEntity.ok().build();
-    }
-
-    // Template endpoints
-    @GetMapping("/templates")
-    public ResponseEntity<List<MomentTemplate>> getAllTemplates() {
-        return ResponseEntity.ok(momentTemplateService.getAllTemplates());
-    }
-
-    @GetMapping("/templates/{id}")
-    public ResponseEntity<MomentTemplate> getTemplate(@PathVariable String id) {
-        return ResponseEntity.ok(momentTemplateService.getTemplate(id));
     }
 
     // Part 6: Share Link endpoints
@@ -177,5 +163,19 @@ public class MomentController {
         Pageable pageable = PageRequest.of(page, size);
         Page<Moment> moments = momentService.getMomentsByShareCode(shareCode, viewerId, pageable);
         return ResponseEntity.ok(moments);
+    }
+
+    @GetMapping("/unread-count")
+    public ResponseEntity<Long> getUnreadCount(Authentication auth) {
+        Long userId = (Long) auth.getPrincipal();
+        long count = momentService.getUnreadCount(userId);
+        return ResponseEntity.ok(count);
+    }
+
+    @PostMapping("/mark-read")
+    public ResponseEntity<Void> markAsRead(Authentication auth) {
+        Long userId = (Long) auth.getPrincipal();
+        momentService.markTimelineAsRead(userId);
+        return ResponseEntity.ok().build();
     }
 }

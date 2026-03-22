@@ -29,38 +29,29 @@ function showToast(message, type = 'normal') {
 }
 
 // ==================== Image Upload ====================
-let momentImageDropzone, momentImageInput, momentImagePreview, momentImagePlaceholder;
+const momentImageDropzone = document.getElementById('moment-image-dropzone');
+const momentImageInput = document.getElementById('moment-image-input');
+const momentImagePreview = document.getElementById('moment-image-preview');
+const momentImagePlaceholder = document.getElementById('moment-image-placeholder');
 
-function initImageUpload() {
-    momentImageDropzone = document.getElementById('moment-image-dropzone');
-    momentImageInput = document.getElementById('moment-image-input');
-    momentImagePreview = document.getElementById('moment-image-preview');
-    momentImagePlaceholder = document.getElementById('moment-image-placeholder');
+momentImageDropzone.addEventListener('click', () => momentImageInput.click());
+momentImageDropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    momentImageDropzone.classList.add('dragover');
+});
+momentImageDropzone.addEventListener('dragleave', () => {
+    momentImageDropzone.classList.remove('dragover');
+});
+momentImageDropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    momentImageDropzone.classList.remove('dragover');
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    handleMomentImages(files);
+});
 
-    if (!momentImageDropzone || !momentImageInput) {
-        console.error('Image upload elements not found');
-        return;
-    }
-
-    momentImageDropzone.addEventListener('click', () => momentImageInput.click());
-    momentImageDropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        momentImageDropzone.classList.add('dragover');
-    });
-    momentImageDropzone.addEventListener('dragleave', () => {
-        momentImageDropzone.classList.remove('dragover');
-    });
-    momentImageDropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        momentImageDropzone.classList.remove('dragover');
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-        handleMomentImages(files);
-    });
-
-    momentImageInput.addEventListener('change', (e) => {
-        handleMomentImages(Array.from(e.target.files));
-    });
-}
+momentImageInput.addEventListener('change', (e) => {
+    handleMomentImages(Array.from(e.target.files));
+});
 
 function handleMomentImages(files) {
     if (momentImages.length + files.length > 9) {
@@ -252,29 +243,22 @@ function createMomentCard(moment, showActions = false) {
 
     let imagesHtml = '';
     if (moment.images && moment.images.length > 0) {
-        console.log('Rendering', moment.images.length, 'images, cardMode:', moment.cardMode); // Debug
-
-        if (moment.cardMode) {
-            // 使用卡片堆叠模式
-            imagesHtml = createCardStack(moment.images, moment.id);
-        } else {
-            // 使用普通网格模式
-            imagesHtml = '<div class="moment-images">';
-            moment.images.forEach(img => {
-                console.log('Image URL:', img.imageUrl); // Debug
-                if (img.livePhoto) {
-                    imagesHtml += `
-                        <div class="moment-image-item">
-                            <img src="${img.imageUrl}" alt="moment image">
-                            <span class="live-badge">LIVE</span>
-                        </div>
-                    `;
-                } else {
-                    imagesHtml += `<img src="${img.imageUrl}" alt="moment image" class="moment-image-item">`;
-                }
-            });
-            imagesHtml += '</div>';
-        }
+        console.log('Rendering', moment.images.length, 'images'); // Debug
+        imagesHtml = '<div class="moment-images">';
+        moment.images.forEach(img => {
+            console.log('Image URL:', img.imageUrl); // Debug
+            if (img.livePhoto) {
+                imagesHtml += `
+                    <div class="moment-image-item">
+                        <img src="${img.imageUrl}" alt="moment image">
+                        <span class="live-badge">LIVE</span>
+                    </div>
+                `;
+            } else {
+                imagesHtml += `<img src="${img.imageUrl}" alt="moment image" class="moment-image-item">`;
+            }
+        });
+        imagesHtml += '</div>';
     } else {
         console.log('No images found for moment', moment.id); // Debug
     }
@@ -306,11 +290,6 @@ function createMomentCard(moment, showActions = false) {
         </div>
         ${actionsHtml}
     `;
-
-    // 如果是卡片堆叠模式，初始化交互
-    if (moment.cardMode && moment.images && moment.images.length > 0) {
-        setTimeout(() => initCardStack(card, moment.id), 0);
-    }
 
     return card;
 }
@@ -499,90 +478,4 @@ function initCardStack(card, momentId) {
     dots.forEach((dot, index) => {
         dot.addEventListener('click', () => updateStack(index));
     });
-}
-
-// ==================== Tab Refresh ====================
-function initTabRefresh() {
-    const momentNav = document.getElementById('moment-nav');
-    if (!momentNav) return;
-
-    momentNav.addEventListener('click', (e) => {
-        const btn = e.target.closest('.pill');
-        if (!btn) return;
-
-        const tab = btn.dataset.tab;
-
-        // 当切换到Timeline或My Moments时，刷新数据
-        if (tab === 'moment-timeline') {
-            loadTimeline(0);
-            // 标记为已读
-            markTimelineAsRead();
-        } else if (tab === 'moment-my') {
-            loadMyMoments(0);
-        }
-    });
-}
-
-// ==================== Unread Count ====================
-async function updateUnreadCount() {
-    try {
-        const response = await fetch(`${API_BASE}/moment/unread-count`, {
-            headers: authHeader()
-        });
-        if (!response.ok) return;
-
-        const count = await response.json();
-        const badge = document.getElementById('moment-unread-badge');
-        if (badge) {
-            if (count > 0) {
-                badge.textContent = count > 99 ? '99+' : count;
-                badge.classList.remove('hidden');
-            } else {
-                badge.classList.add('hidden');
-            }
-        }
-    } catch (error) {
-        console.error('Failed to update unread count:', error);
-    }
-}
-
-async function markTimelineAsRead() {
-    try {
-        await fetch(`${API_BASE}/moment/mark-read`, {
-            method: 'POST',
-            headers: authHeader()
-        });
-        // 清除红点
-        const badge = document.getElementById('moment-unread-badge');
-        if (badge) {
-            badge.classList.add('hidden');
-        }
-    } catch (error) {
-        console.error('Failed to mark as read:', error);
-    }
-}
-
-// 定期检查未读数量（每30秒）
-function startUnreadCountPolling() {
-    updateUnreadCount(); // 立即执行一次
-    setInterval(updateUnreadCount, 30000); // 每30秒检查一次
-}
-
-// ==================== Initialize ====================
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        initImageUpload();
-        initTabRefresh();
-        // 如果用户已登录，启动未读数量轮询
-        if (getToken()) {
-            startUnreadCountPolling();
-        }
-    });
-} else {
-    initImageUpload();
-    initTabRefresh();
-    if (getToken()) {
-        startUnreadCountPolling();
-    }
 }

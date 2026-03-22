@@ -449,7 +449,10 @@
         <!-- ==================== MOMENT MODE ==================== -->
         <div class="view hidden" id="view-moment">
             <nav class="pill-group sub-nav" id="moment-nav">
-                <button class="pill active" data-tab="moment-timeline">Timeline</button>
+                <button class="pill active" data-tab="moment-timeline">
+                    Timeline
+                    <span id="moment-unread-badge" class="req-count-badge hidden">0</span>
+                </button>
                 <button class="pill" data-tab="moment-create">Create</button>
                 <button class="pill" data-tab="moment-my">My Moments</button>
             </nav>
@@ -489,10 +492,11 @@
                     </div>
 
                     <div class="form-group">
-                        <label class="label">Template (optional)</label>
-                        <select id="moment-template" class="input">
-                            <option value="">No template</option>
-                        </select>
+                        <label class="checkbox-row">
+                            <input type="checkbox" id="moment-card-mode">
+                            <span>Enable card stack mode</span>
+                        </label>
+                        <small class="muted">Display images as swipeable stacked cards (iOS style)</small>
                     </div>
 
                     <div class="form-group">

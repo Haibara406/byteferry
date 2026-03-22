@@ -29,11 +29,9 @@ public class Moment {
     @Column(name = "text_content", columnDefinition = "TEXT")
     private String textContent;
 
-    @Column(name = "html_content", columnDefinition = "MEDIUMTEXT")
-    private String htmlContent;
-
-    @Column(name = "template_id", length = 50)
-    private String templateId;
+    @Column(name = "card_mode", nullable = false)
+    @Builder.Default
+    private boolean cardMode = false;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

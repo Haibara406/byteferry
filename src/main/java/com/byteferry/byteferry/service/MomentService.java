@@ -24,31 +24,20 @@ public class MomentService {
     private final MomentImageRepository momentImageRepository;
     private final MomentVisibilityRuleRepository visibilityRuleRepository;
     private final MomentShareLinkRepository shareLinkRepository;
-    private final MomentTemplateRepository momentTemplateRepository;
+    private final MomentReadStatusRepository readStatusRepository;
     private final UserRepository userRepository;
     private final FileUploadUtils fileUploadUtils;
 
     @Transactional
-    public Moment createMoment(Long userId, String textContent, String htmlContent, String templateId,
+    public Moment createMoment(Long userId, String textContent, boolean cardMode,
                                 Visibility visibility, List<Long> visibleUserIds,
                                 MultipartFile[] images, MultipartFile[] liveImages, MultipartFile[] liveVideos) {
-
-        // Apply template if specified
-        if (templateId != null && !templateId.isBlank() && textContent != null) {
-            MomentTemplate template = momentTemplateRepository.findById(templateId).orElse(null);
-            if (template != null) {
-                htmlContent = template.getHtmlTemplate()
-                        .replace("{{content}}", textContent)
-                        .replace("{{title}}", textContent.split("\n")[0]); // First line as title
-            }
-        }
 
         // Create moment
         Moment moment = Moment.builder()
                 .userId(userId)
                 .textContent(textContent)
-                .htmlContent(htmlContent)
-                .templateId(templateId)
+                .cardMode(cardMode)
                 .visibility(visibility)
                 .build();
 
@@ -165,7 +154,7 @@ public class MomentService {
     }
 
     @Transactional
-    public Moment updateMoment(Long id, Long userId, String textContent, String htmlContent,
+    public Moment updateMoment(Long id, Long userId, String textContent,
                                 Visibility visibility, List<Long> visibleUserIds) {
         Moment moment = momentRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Moment not found"));
@@ -175,7 +164,6 @@ public class MomentService {
         }
 
         if (textContent != null) moment.setTextContent(textContent);
-        if (htmlContent != null) moment.setHtmlContent(htmlContent);
         if (visibility != null) {
             moment.setVisibility(visibility);
 
@@ -271,5 +259,33 @@ public class MomentService {
                 viewerId,
                 pageable
         );
+    }
+
+    // Part 7: Unread count methods
+    public long getUnreadCount(Long userId) {
+        MomentReadStatus readStatus = readStatusRepository.findByUserId(userId).orElse(null);
+
+        if (readStatus == null) {
+            // 如果用户从未查看过，返回所有非自己的moment数量
+            return momentRepository.count() - momentRepository.findByUserIdOrderByCreatedAtDesc(userId, Pageable.unpaged()).getTotalElements();
+        }
+
+        return momentRepository.countUnreadMoments(userId, readStatus.getLastReadAt());
+    }
+
+    @Transactional
+    public void markTimelineAsRead(Long userId) {
+        MomentReadStatus readStatus = readStatusRepository.findByUserId(userId).orElse(null);
+
+        if (readStatus == null) {
+            readStatus = MomentReadStatus.builder()
+                    .userId(userId)
+                    .lastReadAt(java.time.LocalDateTime.now())
+                    .build();
+        } else {
+            readStatus.setLastReadAt(java.time.LocalDateTime.now());
+        }
+
+        readStatusRepository.save(readStatus);
     }
 }
