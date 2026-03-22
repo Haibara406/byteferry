@@ -28,6 +28,51 @@ function showToast(message, type = 'normal') {
     }
 }
 
+// 防抖函数
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// 节流函数
+function throttle(func, limit) {
+    let inThrottle;
+    return function(...args) {
+        if (!inThrottle) {
+            func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    };
+}
+
+// 图片懒加载
+function lazyLoadImage(img) {
+    if ('loading' in HTMLImageElement.prototype) {
+        img.loading = 'lazy';
+    } else {
+        // Fallback for browsers that don't support lazy loading
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const image = entry.target;
+                    image.src = image.dataset.src;
+                    image.classList.add('loaded');
+                    observer.unobserve(image);
+                }
+            });
+        });
+        observer.observe(img);
+    }
+}
+
 // ==================== Image Upload ====================
 let momentImageDropzone, momentImageInput, momentImagePreview, momentImagePlaceholder;
 
@@ -195,10 +240,10 @@ async function loadMyMoments(page = 0) {
             return;
         }
 
-        console.log('Loaded moments:', data.content); // Debug log
+        console.log('Loaded moments:', data.content);
 
         data.content.forEach(moment => {
-            console.log('Moment images:', moment.images); // Debug log
+            console.log('Moment images:', moment.images);
             list.appendChild(createMomentCard(moment, true));
         });
 
@@ -494,6 +539,21 @@ function initCardStack(card, momentId) {
 
     stack.addEventListener('mouseup', () => isDragging = false);
     stack.addEventListener('touchend', () => isDragging = false);
+
+    // Wheel event for scrolling through cards with debounce
+    const handleWheel = debounce((e) => {
+        e.preventDefault();
+
+        // deltaY > 0 表示向下滚动，显示下一张
+        // deltaY < 0 表示向上滚动，显示上一张
+        if (e.deltaY > 0 && currentIndex < items.length - 1) {
+            updateStack(currentIndex + 1);
+        } else if (e.deltaY < 0 && currentIndex > 0) {
+            updateStack(currentIndex - 1);
+        }
+    }, 100);
+
+    stack.addEventListener('wheel', handleWheel, { passive: false });
 
     // Dot navigation
     dots.forEach((dot, index) => {
