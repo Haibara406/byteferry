@@ -15,4 +15,7 @@ public interface MomentRepository extends JpaRepository<Moment, Long> {
 
     @Query("SELECT COUNT(m) FROM Moment m WHERE m.userId != :userId AND m.createdAt > :lastReadAt")
     long countUnreadMoments(@Param("userId") Long userId, @Param("lastReadAt") LocalDateTime lastReadAt);
+
+    @Query("SELECT COUNT(m) FROM Moment m WHERE m.userId != :userId")
+    long countByUserIdNot(@Param("userId") Long userId);
 }

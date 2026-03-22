@@ -13,6 +13,7 @@ import com.byteferry.byteferry.service.FriendSessionService;
 import com.byteferry.byteferry.websocket.FriendWebSocketHandler;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +37,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/friend")
 @RequiredArgsConstructor
+@Slf4j
 public class FriendController {
 
     private final FriendService friendService;
@@ -46,7 +48,9 @@ public class FriendController {
     private final ObjectMapper objectMapper;
 
     private Long getUserId(Authentication auth) {
-        if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        if (auth == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
+        }
         return (Long) auth.getPrincipal();
     }
 
@@ -59,7 +63,9 @@ public class FriendController {
     @PostMapping("/request")
     public ResponseEntity<Map<String, Object>> sendRequest(Authentication auth, @RequestBody Map<String, String> body) {
         String username = body.get("username");
-        if (username == null || username.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username required");
+        if (username == null || username.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username required");
+        }
         try {
             Friendship f = friendService.sendRequest(getUserId(auth), username.trim());
             User target = userRepository.findById(f.getFriendId()).orElse(null);
@@ -104,9 +110,16 @@ public class FriendController {
     @GetMapping("/list")
     public ResponseEntity<List<Map<String, Object>>> getFriendList(Authentication auth) {
         List<Friendship> friends = friendService.getFriends(getUserId(auth));
+
+        // 批量查询所有好友的用户信息
+        List<Long> friendIds = friends.stream().map(Friendship::getFriendId).toList();
+        List<User> users = userRepository.findByIdIn(friendIds);
+        Map<Long, User> userMap = users.stream()
+                .collect(java.util.stream.Collectors.toMap(User::getId, u -> u));
+
         List<Map<String, Object>> result = new ArrayList<>();
         for (Friendship f : friends) {
-            User u = userRepository.findById(f.getFriendId()).orElse(null);
+            User u = userMap.get(f.getFriendId());
             Map<String, Object> m = new HashMap<>();
             m.put("friendshipId", f.getId());
             m.put("friendId", f.getFriendId());
@@ -124,9 +137,17 @@ public class FriendController {
         List<Friendship> received = friendService.getPendingRequests(userId);
         List<Friendship> sent = friendService.getSentRequests(userId);
 
+        // 批量查询所有相关用户信息
+        List<Long> allUserIds = new ArrayList<>();
+        allUserIds.addAll(received.stream().map(Friendship::getUserId).toList());
+        allUserIds.addAll(sent.stream().map(Friendship::getFriendId).toList());
+        List<User> users = userRepository.findByIdIn(allUserIds);
+        Map<Long, User> userMap = users.stream()
+                .collect(java.util.stream.Collectors.toMap(User::getId, u -> u));
+
         List<Map<String, Object>> recvList = new ArrayList<>();
         for (Friendship f : received) {
-            User u = userRepository.findById(f.getUserId()).orElse(null);
+            User u = userMap.get(f.getUserId());
             Map<String, Object> m = new HashMap<>();
             m.put("id", f.getId());
             m.put("userId", f.getUserId());
@@ -136,7 +157,7 @@ public class FriendController {
         }
         List<Map<String, Object>> sentList = new ArrayList<>();
         for (Friendship f : sent) {
-            User u = userRepository.findById(f.getFriendId()).orElse(null);
+            User u = userMap.get(f.getFriendId());
             Map<String, Object> m = new HashMap<>();
             m.put("id", f.getId());
             m.put("friendId", f.getFriendId());
@@ -265,7 +286,9 @@ public class FriendController {
     public ResponseEntity<Map<String, Object>> getSession(Authentication auth, @PathVariable String sessionId) {
         Long userId = getUserId(auth);
         FriendSessionData s = friendSessionService.getSession(sessionId);
-        if (s == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found");
+        if (s == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found");
+        }
 
         // Check if user is a participant
         boolean isParticipant = s.getParticipants().stream()
@@ -332,7 +355,9 @@ public class FriendController {
     @PostMapping("/session/{sessionId}/items/text")
     public ResponseEntity<Map<String, Object>> addText(Authentication auth, @PathVariable String sessionId, @RequestBody Map<String, String> body) {
         String content = body.get("content");
-        if (content == null || content.isBlank()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Content required");
+        if (content == null || content.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Content required");
+        }
         try {
             Long userId = getUserId(auth);
             FriendSessionData.FriendSessionItem item = friendSessionService.addTextItem(sessionId, userId, getUsername(auth), content);
@@ -353,7 +378,9 @@ public class FriendController {
 
     @PostMapping("/session/{sessionId}/items/file")
     public ResponseEntity<Map<String, Object>> addFile(Authentication auth, @PathVariable String sessionId, @RequestParam("file") MultipartFile[] files) throws IOException {
-        if (files.length == 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Files required");
+        if (files.length == 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Files required");
+        }
         try {
             Long userId = getUserId(auth);
             FriendSessionData.FriendSessionItem item = friendSessionService.addFileItem(sessionId, userId, getUsername(auth), files);
@@ -386,7 +413,9 @@ public class FriendController {
     public ResponseEntity<Map<String, String>> closeSession(Authentication auth, @PathVariable String sessionId) {
         Long userId = getUserId(auth);
         FriendSessionData s = friendSessionService.getSession(sessionId);
-        if (s == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (s == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
 
         // Only admin can close
         if (!s.getAdminId().equals(userId)) {
@@ -634,7 +663,7 @@ public class FriendController {
                     items.add(im);
                 }
             } catch (Exception e) {
-                // Return empty items on parse failure
+                log.warn("Failed to parse history item: historyId={}, error={}", h.getId(), e.getMessage());
             }
         }
         result.put("items", items);
@@ -655,21 +684,28 @@ public class FriendController {
 
     private ResponseEntity<Resource> serveFile(Long userId, String sessionId, int itemId, int fileIndex, boolean inline) throws IOException {
         FriendSessionData s = friendSessionService.getSession(sessionId);
-        if (s == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (s == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
 
         boolean isParticipant = s.getParticipants().stream()
                 .anyMatch(p -> p.getUserId().equals(userId));
-        if (!isParticipant) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        if (!isParticipant) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
 
         FriendSessionData.FriendSessionItem item = s.getItems().stream()
                 .filter(i -> i.getId() == itemId).findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
-        if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size())
+        if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file index");
+        }
 
         ShareData.FileInfo fi = item.getFiles().get(fileIndex);
         Path path = fileStorageService.load(fi.getFilePath());
-        if (!Files.exists(path)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
+        if (!Files.exists(path)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
+        }
 
         long size = Files.size(path);
         InputStream in = Files.newInputStream(path);
@@ -684,7 +720,9 @@ public class FriendController {
 
     private ResponseEntity<Resource> serveHistoryFile(Long userId, Long historyId, int itemId, int fileIndex, boolean inline) throws IOException {
         FriendSessionHistory h = friendSessionService.getHistoryDetail(userId, historyId);
-        if (h.getItemsJson() == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        if (h.getItemsJson() == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
 
         List<FriendSessionData.FriendSessionItem> items;
         try {
@@ -699,12 +737,15 @@ public class FriendController {
         FriendSessionData.FriendSessionItem item = items.stream()
                 .filter(i -> i.getId() == itemId).findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Item not found"));
-        if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size())
+        if (item.getFiles() == null || fileIndex < 0 || fileIndex >= item.getFiles().size()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid file index");
+        }
 
         ShareData.FileInfo fi = item.getFiles().get(fileIndex);
         Path path = fileStorageService.load(fi.getFilePath());
-        if (!Files.exists(path)) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
+        if (!Files.exists(path)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found");
+        }
 
         long size = Files.size(path);
         InputStream in = Files.newInputStream(path);

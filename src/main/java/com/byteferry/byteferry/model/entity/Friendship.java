@@ -13,9 +13,17 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "friendships", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"user_id", "friend_id"})
-})
+@Table(name = "friendships",
+    uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"user_id", "friend_id"})
+    },
+    indexes = {
+        @Index(name = "idx_user_id", columnList = "user_id"),
+        @Index(name = "idx_friend_id", columnList = "friend_id"),
+        @Index(name = "idx_status", columnList = "status"),
+        @Index(name = "idx_user_status", columnList = "user_id, status")
+    }
+)
 public class Friendship {
 
     @Id

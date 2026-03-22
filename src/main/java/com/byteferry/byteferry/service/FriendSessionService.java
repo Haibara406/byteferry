@@ -295,9 +295,14 @@ public class FriendSessionService {
         if (all.size() <= 10) return;
 
         List<FriendSessionHistory> toDelete = new ArrayList<>(all.subList(10, all.size()));
+
+        // 批量删除数据库记录
+        List<Long> idsToDelete = toDelete.stream().map(FriendSessionHistory::getId).toList();
+        historyRepository.deleteByIdIn(idsToDelete);
+
+        // 删除文件
         for (FriendSessionHistory h : toDelete) {
             String sid = h.getSessionId();
-            historyRepository.deleteById(h.getId());
             // Only delete files when no other user still references this session
             if (historyRepository.countBySessionId(sid) == 0) {
                 deleteHistoryFiles(h.getItemsJson());

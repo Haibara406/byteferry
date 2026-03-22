@@ -36,8 +36,12 @@ public class MomentService {
     private final CacheInvalidationService cacheInvalidationService;
     private final CacheManager redisCacheManager;
 
-    // 为每个缓存键维护一个锁
-    private final ConcurrentHashMap<String, Lock> lockMap = new ConcurrentHashMap<>();
+    // 为每个缓存键维护一个锁，使用 Caffeine 自动过期清理
+    private final com.github.benmanes.caffeine.cache.Cache<String, Lock> lockCache =
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                    .maximumSize(1000)
+                    .expireAfterAccess(10, java.util.concurrent.TimeUnit.MINUTES)
+                    .build();
 
     @Transactional
     public Moment createMoment(Long userId, String textContent, boolean cardMode,
@@ -54,18 +58,21 @@ public class MomentService {
 
         moment = momentRepository.save(moment);
 
-        // Handle visibility rules
+        // Handle visibility rules - 批量保存
         if ((visibility == Visibility.VISIBLE_TO || visibility == Visibility.HIDDEN_FROM) && visibleUserIds != null) {
+            List<MomentVisibilityRule> rules = new ArrayList<>();
             for (Long targetUserId : visibleUserIds) {
                 MomentVisibilityRule rule = MomentVisibilityRule.builder()
                         .momentId(moment.getId())
                         .userId(targetUserId)
                         .build();
-                visibilityRuleRepository.save(rule);
+                rules.add(rule);
             }
+            visibilityRuleRepository.saveAll(rules);
         }
 
-        // Handle regular images
+        // Handle regular images - 批量保存
+        List<MomentImage> imagesToSave = new ArrayList<>();
         if (images != null && images.length > 0) {
             for (int i = 0; i < Math.min(images.length, 9); i++) {
                 String imageUrl = fileUploadUtils.upload(UploadEnum.MOMENT_IMAGE, images[i]);
@@ -75,7 +82,7 @@ public class MomentService {
                         .isLivePhoto(false)
                         .sortOrder(i)
                         .build();
-                momentImageRepository.save(momentImage);
+                imagesToSave.add(momentImage);
             }
         }
 
@@ -92,8 +99,13 @@ public class MomentService {
                         .isLivePhoto(true)
                         .sortOrder(offset + i)
                         .build();
-                momentImageRepository.save(momentImage);
+                imagesToSave.add(momentImage);
             }
+        }
+
+        // 批量保存所有图片
+        if (!imagesToSave.isEmpty()) {
+            momentImageRepository.saveAll(imagesToSave);
         }
 
         // Reload moment with images
@@ -122,17 +134,17 @@ public class MomentService {
     }
 
     /**
-     * 获取缓存键对应的锁
+     * 获取缓存键对应的锁（使用 Caffeine 自动过期）
      */
     private Lock getLock(String cacheKey) {
-        return lockMap.computeIfAbsent(cacheKey, k -> new ReentrantLock());
+        return lockCache.get(cacheKey, k -> new ReentrantLock());
     }
 
     /**
      * 双重检测锁获取My Moments
      */
     public Page<Moment> getMyMoments(Long userId, Pageable pageable) {
-        String cacheKey = userId + ":" + pageable.getPageNumber();
+        String cacheKey = userId + ":" + pageable.getPageNumber() + ":" + pageable.getPageSize();
         Cache cache = redisCacheManager.getCache("myMoments");
 
         if (cache == null) {
@@ -189,10 +201,7 @@ public class MomentService {
 
     private Page<Moment> loadMyMomentsFromDb(Long userId, Pageable pageable) {
         Page<Moment> moments = momentRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
-        moments.forEach(m -> {
-            m.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(m.getId()));
-            loadUserInfo(m);
-        });
+        batchLoadMomentDetails(moments.getContent());
         return moments;
     }
 
@@ -201,13 +210,7 @@ public class MomentService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         Page<Moment> moments = momentRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable);
-
-        // Load images and user info for all moments
-        moments.forEach(moment -> {
-            moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
-            loadUserInfo(moment);
-        });
-
+        batchLoadMomentDetails(moments.getContent());
         return moments;
     }
 
@@ -215,7 +218,7 @@ public class MomentService {
      * 双重检测锁获取Timeline
      */
     public Page<Moment> getAllPublicMoments(Long viewerId, Pageable pageable) {
-        String cacheKey = viewerId + ":" + pageable.getPageNumber();
+        String cacheKey = viewerId + ":" + pageable.getPageNumber() + ":" + pageable.getPageSize();
         Cache cache = redisCacheManager.getCache("timeline");
 
         if (cache == null) {
@@ -272,13 +275,7 @@ public class MomentService {
 
     private Page<Moment> loadTimelineFromDb(Long viewerId, Pageable pageable) {
         Page<Moment> moments = momentRepository.findAllByOrderByCreatedAtDesc(pageable);
-
-        // Load images and user info for all moments
-        moments.forEach(moment -> {
-            moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
-            loadUserInfo(moment);
-        });
-
+        batchLoadMomentDetails(moments.getContent());
         return moments;
     }
 
@@ -286,6 +283,45 @@ public class MomentService {
         userRepository.findById(moment.getUserId()).ifPresent(user -> {
             moment.setUsername(user.getUsername());
             moment.setAvatar(user.getAvatar());
+        });
+    }
+
+    /**
+     * 批量加载 Moment 的关联数据（images 和 user info）
+     * 解决 N+1 查询问题：将 1+2N 次查询优化为 1+2 次
+     */
+    private void batchLoadMomentDetails(List<Moment> moments) {
+        if (moments.isEmpty()) {
+            return;
+        }
+
+        // 1. 批量查询所有 images（1次查询）
+        List<Long> momentIds = moments.stream().map(Moment::getId).toList();
+        List<MomentImage> allImages = momentImageRepository.findByMomentIdInOrderBySortOrder(momentIds);
+
+        // 按 momentId 分组
+        var imagesByMomentId = allImages.stream()
+                .collect(java.util.stream.Collectors.groupingBy(MomentImage::getMomentId));
+
+        // 2. 批量查询所有 users（1次查询）
+        List<Long> userIds = moments.stream().map(Moment::getUserId).distinct().toList();
+        List<User> users = userRepository.findByIdIn(userIds);
+
+        // 构建 userId -> User 的映射
+        var userMap = users.stream()
+                .collect(java.util.stream.Collectors.toMap(User::getId, u -> u));
+
+        // 3. 填充数据
+        moments.forEach(moment -> {
+            // 设置 images
+            moment.setImages(imagesByMomentId.getOrDefault(moment.getId(), new ArrayList<>()));
+
+            // 设置 user info
+            User user = userMap.get(moment.getUserId());
+            if (user != null) {
+                moment.setUsername(user.getUsername());
+                moment.setAvatar(user.getAvatar());
+            }
         });
     }
 
@@ -299,20 +335,24 @@ public class MomentService {
             throw new RuntimeException("No permission to edit this moment");
         }
 
-        if (textContent != null) moment.setTextContent(textContent);
+        if (textContent != null) {
+            moment.setTextContent(textContent);
+        }
         if (visibility != null) {
             moment.setVisibility(visibility);
 
-            // Update visibility rules
+            // Update visibility rules - 批量保存
             visibilityRuleRepository.deleteByMomentId(id);
             if ((visibility == Visibility.VISIBLE_TO || visibility == Visibility.HIDDEN_FROM) && visibleUserIds != null) {
+                List<MomentVisibilityRule> rules = new ArrayList<>();
                 for (Long targetUserId : visibleUserIds) {
                     MomentVisibilityRule rule = MomentVisibilityRule.builder()
                             .momentId(id)
                             .userId(targetUserId)
                             .build();
-                    visibilityRuleRepository.save(rule);
+                    rules.add(rule);
                 }
+                visibilityRuleRepository.saveAll(rules);
             }
         }
 
@@ -348,20 +388,17 @@ public class MomentService {
     }
 
     public boolean canView(Moment moment, Long viewerId) {
-        if (moment.getUserId().equals(viewerId)) return true;
-
-        switch (moment.getVisibility()) {
-            case PUBLIC:
-                return true;
-            case PRIVATE:
-                return false;
-            case VISIBLE_TO:
-                return visibilityRuleRepository.existsByMomentIdAndUserId(moment.getId(), viewerId);
-            case HIDDEN_FROM:
-                return !visibilityRuleRepository.existsByMomentIdAndUserId(moment.getId(), viewerId);
-            default:
-                return false;
+        if (moment.getUserId().equals(viewerId)) {
+            return true;
         }
+
+        return switch (moment.getVisibility()) {
+            case PUBLIC -> true;
+            case PRIVATE -> false;
+            case VISIBLE_TO -> visibilityRuleRepository.existsByMomentIdAndUserId(moment.getId(), viewerId);
+            case HIDDEN_FROM -> !visibilityRuleRepository.existsByMomentIdAndUserId(moment.getId(), viewerId);
+            default -> false;
+        };
     }
 
     // Part 6: Share Link methods
@@ -405,8 +442,8 @@ public class MomentService {
         MomentReadStatus readStatus = readStatusRepository.findByUserId(userId).orElse(null);
 
         if (readStatus == null) {
-            // 如果用户从未查看过，返回所有非自己的moment数量
-            return momentRepository.count() - momentRepository.findByUserIdOrderByCreatedAtDesc(userId, Pageable.unpaged()).getTotalElements();
+            // 如果用户从未查看过，返回所有非自己的moment数量（优化：使用单个 COUNT 查询）
+            return momentRepository.countByUserIdNot(userId);
         }
 
         return momentRepository.countUnreadMoments(userId, readStatus.getLastReadAt());

@@ -81,15 +81,11 @@ public class FileUploadUtils {
     }
 
     /**
-     * 单文件删除
+     * 单文件删除（优化：直接删除，不检查是否存在）
      */
     public boolean deleteFile(String dir, String fileName) {
         try {
             String objectName = dir + fileName;
-            if (!isFileExist(dir, fileName)) {
-                log.warn("文件 {} 不存在", objectName);
-                return false;
-            }
             client.removeObject(
                     RemoveObjectArgs.builder()
                             .bucket(bucketName)
@@ -159,9 +155,13 @@ public class FileUploadUtils {
                     .objects(deleteObjects)
                     .build();
             Iterable<io.minio.Result<DeleteError>> results = client.removeObjects(args);
+            boolean hasError = false;
             for (io.minio.Result<DeleteError> result : results) {
                 DeleteError error = result.get();
                 log.error("文件 {} 删除错误: {}", error.objectName(), error.message());
+                hasError = true;
+            }
+            if (hasError) {
                 return false;
             }
             log.info("批量删除 {} 个文件成功", deleteObjects.size());
@@ -184,12 +184,13 @@ public class FileUploadUtils {
                     .objects(deleteObjects)
                     .build();
             Iterable<io.minio.Result<DeleteError>> results = client.removeObjects(args);
+            boolean hasError = false;
             for (io.minio.Result<DeleteError> result : results) {
                 DeleteError error = result.get();
                 log.error("文件 {} 删除错误: {}", error.objectName(), error.message());
-                return false;
+                hasError = true;
             }
-            return true;
+            return !hasError;
         } catch (Exception e) {
             log.error("批量删除文件失败", e);
             return false;
@@ -219,26 +220,26 @@ public class FileUploadUtils {
     }
 
     /**
-     * 判断文件是否存在
+     * 判断文件是否存在（优化：使用 statObject 代替 listObjects）
      */
     public boolean isFileExist(String dir, String fileName) {
-        dir = dir.endsWith("/") ? dir : dir + "/";
-        ListObjectsArgs args = ListObjectsArgs.builder()
-                .bucket(bucketName)
-                .prefix(dir)
-                .build();
-        Iterable<io.minio.Result<Item>> results = client.listObjects(args);
-
-        for (io.minio.Result<Item> result : results) {
-            try {
-                if (result.get().objectName().equals(dir + fileName)) {
-                    return true;
-                }
-            } catch (Exception e) {
-                log.error("判断文件是否存在出错", e);
-            }
+        try {
+            dir = dir.endsWith("/") ? dir : dir + "/";
+            String objectName = dir + fileName;
+            client.statObject(
+                    io.minio.StatObjectArgs.builder()
+                            .bucket(bucketName)
+                            .object(objectName)
+                            .build()
+            );
+            return true;
+        } catch (io.minio.errors.ErrorResponseException e) {
+            // 文件不存在
+            return false;
+        } catch (Exception e) {
+            log.error("判断文件是否存在出错", e);
+            return false;
         }
-        return false;
     }
 
     /**

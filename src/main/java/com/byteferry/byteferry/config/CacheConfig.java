@@ -30,9 +30,10 @@ public class CacheConfig {
     public CacheManager caffeineCacheManager() {
         CaffeineCacheManager cacheManager = new CaffeineCacheManager("myMoments", "timeline");
         cacheManager.setCaffeine(Caffeine.newBuilder()
-                .maximumSize(1000)
-                .expireAfterWrite(2, TimeUnit.HOURS)
-                .recordStats());
+                .maximumSize(1000)  // 最多缓存1000个条目
+                .expireAfterWrite(2, TimeUnit.HOURS)  // 写入后2小时过期
+                .expireAfterAccess(1, TimeUnit.HOURS)  // 访问后1小时过期
+                .recordStats());  // 记录统计信息
         return cacheManager;
     }
 

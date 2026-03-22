@@ -28,23 +28,42 @@ public class FriendSessionCleanupTask {
 
     @Scheduled(fixedRate = 30000)
     public void cleanupExpiredSessions() {
-        // Scan all user sets for stale session references
-        Set<String> keys = redisTemplate.keys(USER_SET_PREFIX + "*");
-        if (keys == null || keys.isEmpty()) return;
+        // 使用SCAN代替KEYS，避免阻塞Redis
+        redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Void>) connection -> {
+            var cursor = connection.scan(
+                org.springframework.data.redis.core.ScanOptions.scanOptions()
+                    .match(USER_SET_PREFIX + "*")
+                    .count(100)
+                    .build()
+            );
 
-        for (String userSetKey : keys) {
-            Set<Object> sessionIds = redisTemplate.opsForSet().members(userSetKey);
-            if (sessionIds == null) continue;
+            while (cursor.hasNext()) {
+                byte[] keyBytes = cursor.next();
+                String userSetKey = new String(keyBytes);
 
-            for (Object sidObj : sessionIds) {
-                String sid = sidObj.toString();
-                Boolean exists = redisTemplate.hasKey(KEY_PREFIX + sid);
-                if (Boolean.FALSE.equals(exists)) {
-                    // Session expired from Redis (TTL), clean up reference
-                    redisTemplate.opsForSet().remove(userSetKey, sid);
-                    log.debug("Removed stale friend session reference: {}", sid);
+                Set<Object> sessionIds = redisTemplate.opsForSet().members(userSetKey);
+                if (sessionIds == null) {
+                    continue;
+                }
+
+                for (Object sidObj : sessionIds) {
+                    String sid = sidObj.toString();
+                    Boolean exists = redisTemplate.hasKey(KEY_PREFIX + sid);
+                    if (Boolean.FALSE.equals(exists)) {
+                        // Session expired from Redis (TTL), clean up reference
+                        redisTemplate.opsForSet().remove(userSetKey, sid);
+                        log.debug("Removed stale friend session reference: {}", sid);
+                    }
                 }
             }
-        }
+
+            try {
+                cursor.close();
+            } catch (Exception e) {
+                log.warn("Error closing cursor", e);
+            }
+
+            return null;
+        });
     }
 }

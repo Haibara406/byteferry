@@ -13,7 +13,11 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "friend_session_history")
+@Table(name = "friend_session_history", indexes = {
+    @Index(name = "idx_user_id", columnList = "user_id"),
+    @Index(name = "idx_session_id", columnList = "session_id"),
+    @Index(name = "idx_user_closed", columnList = "user_id, closed_at")
+})
 public class FriendSessionHistory {
 
     @Id

@@ -11,9 +11,15 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "moment_visibility_rules", uniqueConstraints = {
-    @UniqueConstraint(columnNames = {"moment_id", "user_id"})
-})
+@Table(name = "moment_visibility_rules",
+    uniqueConstraints = {
+        @UniqueConstraint(columnNames = {"moment_id", "user_id"})
+    },
+    indexes = {
+        @Index(name = "idx_moment_id", columnList = "moment_id"),
+        @Index(name = "idx_user_id", columnList = "user_id")
+    }
+)
 public class MomentVisibilityRule {
 
     @Id

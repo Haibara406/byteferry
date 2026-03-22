@@ -56,15 +56,39 @@ public class CacheInvalidationService {
                 caffeineCache.evict(userId);
             }
 
-            // 清除Redis缓存（所有分页）
+            // 清除Redis缓存（使用SCAN代替KEYS，避免阻塞）
             String cacheKeyPattern = cacheType + "::" + userId + ":*";
-            Set<String> keys = redisTemplate.keys(cacheKeyPattern);
-            if (keys != null && !keys.isEmpty()) {
-                redisTemplate.delete(keys);
-            }
+            scanAndDelete(cacheKeyPattern);
         }
 
         log.debug("Invalidated {} cache for {} users", cacheType, userIds.size());
+    }
+
+    /**
+     * 使用SCAN命令安全地删除匹配的键，避免阻塞Redis
+     */
+    private void scanAndDelete(String pattern) {
+        redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Void>) connection -> {
+            var cursor = connection.scan(
+                org.springframework.data.redis.core.ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(100)
+                    .build()
+            );
+
+            while (cursor.hasNext()) {
+                byte[] key = cursor.next();
+                connection.del(key);
+            }
+
+            try {
+                cursor.close();
+            } catch (Exception e) {
+                log.warn("Error closing cursor", e);
+            }
+
+            return null;
+        });
     }
 
     /**
@@ -147,12 +171,38 @@ public class CacheInvalidationService {
             caffeineCache.clear();
         }
 
-        // 清除所有Redis缓存
+        // 使用SCAN清除所有Redis缓存
         String cacheKeyPattern = "timeline::*";
-        Set<String> keys = redisTemplate.keys(cacheKeyPattern);
-        if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
-            log.debug("Cleared all timeline cache, {} keys deleted", keys.size());
-        }
+        int deletedCount = scanAndDeleteWithCount(cacheKeyPattern);
+        log.debug("Cleared all timeline cache, {} keys deleted", deletedCount);
+    }
+
+    /**
+     * 使用SCAN命令删除并返回删除数量
+     */
+    private int scanAndDeleteWithCount(String pattern) {
+        return redisTemplate.execute((org.springframework.data.redis.core.RedisCallback<Integer>) connection -> {
+            int count = 0;
+            var cursor = connection.scan(
+                org.springframework.data.redis.core.ScanOptions.scanOptions()
+                    .match(pattern)
+                    .count(100)
+                    .build()
+            );
+
+            while (cursor.hasNext()) {
+                byte[] key = cursor.next();
+                connection.del(key);
+                count++;
+            }
+
+            try {
+                cursor.close();
+            } catch (Exception e) {
+                log.warn("Error closing cursor", e);
+            }
+
+            return count;
+        });
     }
 }

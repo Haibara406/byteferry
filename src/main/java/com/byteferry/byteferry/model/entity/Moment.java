@@ -18,7 +18,11 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "moments")
+@Table(name = "moments", indexes = {
+    @Index(name = "idx_user_id", columnList = "user_id"),
+    @Index(name = "idx_created_at", columnList = "created_at"),
+    @Index(name = "idx_user_created", columnList = "user_id, created_at")
+})
 public class Moment implements Serializable {
     private static final long serialVersionUID = 1L;
 

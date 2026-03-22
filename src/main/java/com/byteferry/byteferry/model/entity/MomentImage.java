@@ -13,7 +13,10 @@ import java.io.Serializable;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "moment_images")
+@Table(name = "moment_images", indexes = {
+    @Index(name = "idx_moment_id", columnList = "moment_id"),
+    @Index(name = "idx_moment_sort", columnList = "moment_id, sort_order")
+})
 public class MomentImage implements Serializable {
     private static final long serialVersionUID = 1L;
 
