@@ -55,7 +55,7 @@ server:
 minio:
   endpoint: http://154.94.235.178:9000
   url: https://minio.haikari.top
-  publicUrl: http://154.94.235.178:9000
+  publicUrl: https://minio.haikari.top
   accessKey: haibara
   secretKey: "Ww249260523.."
   bucketName: byteferry
