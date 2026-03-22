@@ -50,6 +50,12 @@ public class Moment {
     @Builder.Default
     private List<MomentImage> images = new ArrayList<>();
 
+    @Transient
+    private String username;
+
+    @Transient
+    private String avatar;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

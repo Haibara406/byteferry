@@ -296,9 +296,12 @@ function createMomentCard(moment, showActions = false) {
 
     card.innerHTML = `
         <div class="moment-header">
-            <div>
-                <strong>User ID: ${moment.userId}</strong>
-                <small class="muted"> • ${date}</small>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                ${moment.avatar ? `<img src="${moment.avatar}" alt="avatar" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;">` : ''}
+                <div>
+                    <strong>${moment.username || 'User ' + moment.userId}</strong>
+                    <small class="muted"> • ${date}</small>
+                </div>
             </div>
             ${visibilityBadge}
         </div>

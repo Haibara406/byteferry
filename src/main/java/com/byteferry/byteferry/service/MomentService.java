@@ -24,6 +24,7 @@ public class MomentService {
     private final MomentImageRepository momentImageRepository;
     private final MomentVisibilityRuleRepository visibilityRuleRepository;
     private final MomentShareLinkRepository shareLinkRepository;
+    private final MomentTemplateRepository momentTemplateRepository;
     private final UserRepository userRepository;
     private final FileUploadUtils fileUploadUtils;
 
@@ -31,6 +32,16 @@ public class MomentService {
     public Moment createMoment(Long userId, String textContent, String htmlContent, String templateId,
                                 Visibility visibility, List<Long> visibleUserIds,
                                 MultipartFile[] images, MultipartFile[] liveImages, MultipartFile[] liveVideos) {
+
+        // Apply template if specified
+        if (templateId != null && !templateId.isBlank() && textContent != null) {
+            MomentTemplate template = momentTemplateRepository.findById(templateId).orElse(null);
+            if (template != null) {
+                htmlContent = template.getHtmlTemplate()
+                        .replace("{{content}}", textContent)
+                        .replace("{{title}}", textContent.split("\n")[0]); // First line as title
+            }
+        }
 
         // Create moment
         Moment moment = Moment.builder()
@@ -88,6 +99,7 @@ public class MomentService {
         // Reload moment with images
         Moment result = momentRepository.findById(moment.getId()).orElse(moment);
         result.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
+        loadUserInfo(result);
         return result;
     }
 
@@ -99,14 +111,18 @@ public class MomentService {
             throw new RuntimeException("No permission to view this moment");
         }
 
-        // Load images
+        // Load images and user info
         moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(id));
+        loadUserInfo(moment);
         return moment;
     }
 
     public Page<Moment> getMyMoments(Long userId, Pageable pageable) {
         Page<Moment> moments = momentRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
-        moments.forEach(m -> m.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(m.getId())));
+        moments.forEach(m -> {
+            m.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(m.getId()));
+            loadUserInfo(m);
+        });
         return moments;
     }
 
@@ -120,6 +136,7 @@ public class MomentService {
         moments.forEach(moment -> {
             if (canView(moment, viewerId)) {
                 moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
+                loadUserInfo(moment);
             }
         });
 
@@ -133,10 +150,18 @@ public class MomentService {
         moments.forEach(moment -> {
             if (canView(moment, viewerId)) {
                 moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
+                loadUserInfo(moment);
             }
         });
 
         return moments;
+    }
+
+    private void loadUserInfo(Moment moment) {
+        userRepository.findById(moment.getUserId()).ifPresent(user -> {
+            moment.setUsername(user.getUsername());
+            moment.setAvatar(user.getAvatar());
+        });
     }
 
     @Transactional
