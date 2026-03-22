@@ -16,6 +16,13 @@ spring:
           max-idle: 4
           min-idle: 2
 
+  # Cache
+  cache:
+    type: redis
+    redis:
+      time-to-live: 86400000  # 24 hours in milliseconds
+      cache-null-values: false
+
   # MySQL
   datasource:
     url: jdbc:mysql://8.156.75.132:3306/byteferry?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true

@@ -1,12 +1,14 @@
 package com.byteferry.byteferry.model.entity;
 
 import com.byteferry.byteferry.model.enums.Visibility;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -17,7 +19,8 @@ import java.util.List;
 @AllArgsConstructor
 @Entity
 @Table(name = "moments")
-public class Moment {
+public class Moment implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -45,13 +48,16 @@ public class Moment {
     private LocalDateTime updatedAt;
 
     @Transient
+    @JsonProperty("images")
     @Builder.Default
     private List<MomentImage> images = new ArrayList<>();
 
     @Transient
+    @JsonProperty("username")
     private String username;
 
     @Transient
+    @JsonProperty("avatar")
     private String avatar;
 
     @PrePersist

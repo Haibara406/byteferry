@@ -63,8 +63,8 @@ header {
     -webkit-backdrop-filter: blur(24px) saturate(150%);
     box-shadow: 0 10px 24px rgba(53,78,186,0.08);
 }
-.header-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-.header-right { display: flex; align-items: center; gap: 16px; }
+.header-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 32px; }
+.header-right { display: flex; align-items: center; gap: 16px; flex: 1; justify-content: flex-end; }
 #user-info {
     display: flex;
     align-items: center;

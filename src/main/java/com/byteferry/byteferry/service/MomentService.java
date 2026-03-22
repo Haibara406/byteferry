@@ -1,11 +1,14 @@
 package com.byteferry.byteferry.service;
 
 import com.byteferry.byteferry.enums.UploadEnum;
+import com.byteferry.byteferry.model.dto.PageResult;
 import com.byteferry.byteferry.model.entity.*;
 import com.byteferry.byteferry.model.enums.Visibility;
 import com.byteferry.byteferry.repository.*;
 import com.byteferry.byteferry.util.FileUploadUtils;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -15,6 +18,9 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +33,11 @@ public class MomentService {
     private final MomentReadStatusRepository readStatusRepository;
     private final UserRepository userRepository;
     private final FileUploadUtils fileUploadUtils;
+    private final CacheInvalidationService cacheInvalidationService;
+    private final CacheManager redisCacheManager;
+
+    // 为每个缓存键维护一个锁
+    private final ConcurrentHashMap<String, Lock> lockMap = new ConcurrentHashMap<>();
 
     @Transactional
     public Moment createMoment(Long userId, String textContent, boolean cardMode,
@@ -89,6 +100,10 @@ public class MomentService {
         Moment result = momentRepository.findById(moment.getId()).orElse(moment);
         result.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
         loadUserInfo(result);
+
+        // 清除缓存
+        cacheInvalidationService.onMomentCreated(result);
+
         return result;
     }
 
@@ -106,7 +121,73 @@ public class MomentService {
         return moment;
     }
 
+    /**
+     * 获取缓存键对应的锁
+     */
+    private Lock getLock(String cacheKey) {
+        return lockMap.computeIfAbsent(cacheKey, k -> new ReentrantLock());
+    }
+
+    /**
+     * 双重检测锁获取My Moments
+     */
     public Page<Moment> getMyMoments(Long userId, Pageable pageable) {
+        String cacheKey = userId + ":" + pageable.getPageNumber();
+        Cache cache = redisCacheManager.getCache("myMoments");
+
+        if (cache == null) {
+            return loadMyMomentsFromDb(userId, pageable);
+        }
+
+        // 第一次检查缓存
+        Cache.ValueWrapper wrapper = cache.get(cacheKey);
+        if (wrapper != null) {
+            try {
+                Object cachedValue = wrapper.get();
+                if (cachedValue instanceof PageResult) {
+                    return ((PageResult<Moment>) cachedValue).toPage();
+                } else {
+                    // 旧格式的缓存，清除并重新加载
+                    cache.evict(cacheKey);
+                }
+            } catch (Exception e) {
+                // 反序列化失败，清除缓存
+                cache.evict(cacheKey);
+            }
+        }
+
+        // 获取锁
+        Lock lock = getLock("myMoments:" + cacheKey);
+        lock.lock();
+        try {
+            // 第二次检查缓存（双重检测）
+            wrapper = cache.get(cacheKey);
+            if (wrapper != null) {
+                try {
+                    Object cachedValue = wrapper.get();
+                    if (cachedValue instanceof PageResult) {
+                        return ((PageResult<Moment>) cachedValue).toPage();
+                    } else {
+                        cache.evict(cacheKey);
+                    }
+                } catch (Exception e) {
+                    cache.evict(cacheKey);
+                }
+            }
+
+            // 从数据库加载
+            Page<Moment> moments = loadMyMomentsFromDb(userId, pageable);
+
+            // 写入缓存（使用PageResult包装）
+            cache.put(cacheKey, PageResult.of(moments));
+
+            return moments;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Page<Moment> loadMyMomentsFromDb(Long userId, Pageable pageable) {
         Page<Moment> moments = momentRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
         moments.forEach(m -> {
             m.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(m.getId()));
@@ -121,26 +202,81 @@ public class MomentService {
 
         Page<Moment> moments = momentRepository.findByUserIdOrderByCreatedAtDesc(user.getId(), pageable);
 
-        // Filter by visibility and load images
+        // Load images and user info for all moments
         moments.forEach(moment -> {
-            if (canView(moment, viewerId)) {
-                moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
-                loadUserInfo(moment);
-            }
+            moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
+            loadUserInfo(moment);
         });
 
         return moments;
     }
 
+    /**
+     * 双重检测锁获取Timeline
+     */
     public Page<Moment> getAllPublicMoments(Long viewerId, Pageable pageable) {
+        String cacheKey = viewerId + ":" + pageable.getPageNumber();
+        Cache cache = redisCacheManager.getCache("timeline");
+
+        if (cache == null) {
+            return loadTimelineFromDb(viewerId, pageable);
+        }
+
+        // 第一次检查缓存
+        Cache.ValueWrapper wrapper = cache.get(cacheKey);
+        if (wrapper != null) {
+            try {
+                Object cachedValue = wrapper.get();
+                if (cachedValue instanceof PageResult) {
+                    return ((PageResult<Moment>) cachedValue).toPage();
+                } else {
+                    // 旧格式的缓存，清除并重新加载
+                    cache.evict(cacheKey);
+                }
+            } catch (Exception e) {
+                // 反序列化失败，清除缓存
+                cache.evict(cacheKey);
+            }
+        }
+
+        // 获取锁
+        Lock lock = getLock("timeline:" + cacheKey);
+        lock.lock();
+        try {
+            // 第二次检查缓存（双重检测）
+            wrapper = cache.get(cacheKey);
+            if (wrapper != null) {
+                try {
+                    Object cachedValue = wrapper.get();
+                    if (cachedValue instanceof PageResult) {
+                        return ((PageResult<Moment>) cachedValue).toPage();
+                    } else {
+                        cache.evict(cacheKey);
+                    }
+                } catch (Exception e) {
+                    cache.evict(cacheKey);
+                }
+            }
+
+            // 从数据库加载
+            Page<Moment> moments = loadTimelineFromDb(viewerId, pageable);
+
+            // 写入缓存（使用PageResult包装）
+            cache.put(cacheKey, PageResult.of(moments));
+
+            return moments;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Page<Moment> loadTimelineFromDb(Long viewerId, Pageable pageable) {
         Page<Moment> moments = momentRepository.findAllByOrderByCreatedAtDesc(pageable);
 
-        // Filter by visibility and load images
+        // Load images and user info for all moments
         moments.forEach(moment -> {
-            if (canView(moment, viewerId)) {
-                moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
-                loadUserInfo(moment);
-            }
+            moment.setImages(momentImageRepository.findByMomentIdOrderBySortOrder(moment.getId()));
+            loadUserInfo(moment);
         });
 
         return moments;
@@ -206,6 +342,9 @@ public class MomentService {
         }
 
         momentRepository.deleteById(id);
+
+        // 清除缓存
+        cacheInvalidationService.onMomentDeleted(moment);
     }
 
     public boolean canView(Moment moment, Long viewerId) {
